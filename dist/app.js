@@ -334,8 +334,9 @@ const FAMILIES={'3D':NAMES3,'4D':NAMES4};
 const FAM_DEFAULT={'3D':'Cube','4D':'Tesseract'};
 const EPS=1e-5;
 function projectionGroups(P,axes){
+ const tolerance=1e-10;
  const sorted=P.map((p,i)=>i).sort((a,b)=>P[a][axes[0]]-P[b][axes[0]]), groups=[];
- for(const i of sorted){let found=null;for(let j=groups.length-1;j>=0;j--){const g=groups[j];if(P[i][axes[0]]-P[g.idx[0]][axes[0]]>EPS)break;if(axes.every(k=>Math.abs(P[i][k]-P[g.idx[0]][k])<=EPS)){found=g;break}}
+ for(const i of sorted){let found=null;for(let j=groups.length-1;j>=0;j--){const g=groups[j];if(P[i][axes[0]]-P[g.idx[0]][axes[0]]>tolerance)break;if(axes.every(k=>Math.abs(P[i][k]-P[g.idx[0]][k])<=tolerance)){found=g;break}}
  if(found)found.idx.push(i);else groups.push({idx:[i]});}
  return groups;
 }
@@ -353,7 +354,7 @@ function shape(n){
     even:(EVEN3[n]||[]).map(e=>({key:e.key,planes:e.planes,dirs:e.dirs.map(to4)}))};
 }
 const cache={}; const get=n=>cache[n]||(cache[n]=shape(n));
-const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const motionPreference=matchMedia('(prefers-reduced-motion: reduce)');let reduce=motionPreference.matches;
 const $=id=>document.getElementById(id);
 const r2=Math.SQRT2,r3=Math.sqrt(3);
 const RAT=[[1,'1'],[PHI,'φ'],[PHI*PHI,'φ²'],[PHI**3,'φ³'],[2,'2'],[3,'3'],[1.5,'3⁄2'],[r2,'√2'],[r3,'√3'],[4,'4']];
@@ -667,13 +668,14 @@ function intersectSection(model,position,hull3){
   return selectedShapeSection(model.V,model.E,position,{hull3,cells:model.cells});
 }
 // One selected source and one real rotation drive the entire shadow chain.
-let mode='shadows',presentation='shadow',operation='collapse',dimension=3,cutPosition=0,queued=false,cutPointer=null,cutGrabOffset=0;
+let mode='shadows',operation='collapse',dimension=3,cutPosition=0,queued=false,cutPointer=null,cutGrabOffset=0;
 const sliceChoices={2:['Square','Triangle'],3:['Cube','Tetra','Octa','Icosa','Dodeca'],4:['Tesseract','5-cell','16-cell']};
 const sourceNames={2:'Square',3:'Cube',4:'Tesseract'},orientationIndices={2:0,3:0,4:0},CAMERA_E=.5,CONTEXT_W=.65;
 const pretty=n=>FULL[n]||n;
-const defaultGaps={2:4,3:4,4:4},layerGaps={...defaultGaps};let planeTilt=CAMERA_E,horizon=false;
+const defaultGaps={2:32,3:16,4:4},layerGaps={...defaultGaps};let planeTilt=17*Math.PI/180;
 
-let rotation=I4(),baseModel=null,freeOrientation=false,selectedCell=0;
+let rotation=I4(),baseModel=null,freeOrientation=false,selectedCell=0,poseList=[],poseIndex=0;
+let autoPlaying=false,motion=null,motionFrame=null,holdStart=0;const HOLD_MS=5000,TURN_MS=1200;
 function determinant4(m){let out=0;for(let a=0;a<4;a++)for(let b=0;b<4;b++)for(let c=0;c<4;c++)for(let d=0;d<4;d++){const p=[a,b,c,d];if(new Set(p).size<4)continue;let inversions=0;for(let i=0;i<4;i++)for(let j=i+1;j<4;j++)if(p[i]>p[j])inversions++;out+=(inversions%2?-1:1)*m[a]*m[4+b]*m[8+c]*m[12+d]}return out}
 let css={};
 function readCss(){const s=getComputedStyle(document.documentElement);['bg','panel','ink','muted','line','plane','planeEdge','m2','shadow','glass','solid','source','tick','lineColor','shadowBack'].forEach(k=>css[k]=s.getPropertyValue('--'+k).trim())}
@@ -683,13 +685,10 @@ function orientationFor(model,n){
  if(n===4)M=mm4(giv(1,2,.18),mm4(giv(0,2,.32),M));return M;
 }
 function resetOrientation(){
- baseModel=sliceModel(sourceNames[dimension],dimension,orientationIndices[dimension]);rotation=orientationFor(baseModel,dimension);
- freeOrientation=false;selectedCell=0;
- if(dimension===4){const P=sharedSource().P;let best=-Infinity;baseModel.cells.forEach((cell,i)=>{const w=cell.reduce((v,j)=>v+P[j][3],0)/cell.length;if(w>best){best=w;selectedCell=i}})}
+ baseModel=sliceModel(sourceNames[dimension],dimension,0);poseList=CuratedRotations.presetsFor(baseModel);poseIndex=Math.max(0,Math.min(poseList.length-1,orientationIndices[dimension]||0));rotation=poseList[poseIndex].matrix.slice();baseModel.orientationName=poseList[poseIndex].label;baseModel.orientationCount=poseList.length;freeOrientation=false;selectedCell=0;
 }
 function sharedSource(){
  const V=baseModel.rawV.map(v=>[...v,...Array(4-v.length).fill(0)]),P=V.map(v=>mul4(rotation,v));
- if(!freeOrientation){baseModel.V.forEach((v,i)=>{const k=dimension===3?1:dimension-1;P[i][k]=v[dimension-1]})}
  const F=dimension===3?get(baseModel.name).F:null;
  return{S:{name:baseModel.name,dim:dimension,V,E:baseModel.E,F,cells:baseModel.cells},P};
 }
@@ -702,31 +701,56 @@ function selectedModel(n=dimension){
 function sliceData(n=dimension,s=cutPosition){if(![2,3,4].includes(n)||!Number.isFinite(s)||s< -1.2||s>1.2)throw new Error('Choose a shape and a cut position from -1.2 to 1.2.');return intersectSection(selectedModel(n),s)}
 function chooseDimension(n){if(![2,3,4].includes(n))throw new Error('Choose a listed dimension.');if(n!==dimension)chooseShape(sourceNames[n])}
 function chooseMode(next){if(next!=='shadows')return;mode=next;syncUi();draw()}
-function chooseOperation(next){if(next==='project')next='collapse';if(!['slice','collapse'].includes(next))throw new Error('Choose Slice or Collapse.');operation=next;cutPointer=null;shadow.clearSelection();syncUi();draw()}
-function choosePresentation(next){if(next==='angled')next='shadow';if(!['shadow','topdown','horizon'].includes(next))throw new Error('Choose Angled, Top down, or Horizon.');presentation=next==='topdown'?'topdown':'shadow';horizon=next==='horizon';syncUi();draw()}
-function chooseShape(name){const n=[2,3,4].find(n=>sliceChoices[n].includes(name));if(!n)throw new Error('Choose a listed shape.');dimension=n;sourceNames[n]=name;orientationIndices[n]=name==='16-cell'?1:0;cutPosition=0;$('cutPosition').value=0;cutPointer=null;resetOrientation();syncUi();if(typeof shadow!=='undefined')shadow.clearSelection();draw()}
-function rotateSlice(){if(!freeOrientation)orientationIndices[dimension]=(orientationIndices[dimension]+1)%baseModel.orientationCount;resetOrientation();syncUi();shadow.clearSelection();draw()}
-function rotateShared(dx,dy){if(dimension===2)rotation=mm4(giv(0,1,(dx-dy)*.01),rotation);else{if(dx)rotation=mm4(giv(0,dimension===4?3:2,-dx*.01),rotation);if(dy)rotation=mm4(giv(1,2,dy*.01),rotation)}freeOrientation=true;shadow.clearSelection();updateRotateLabel();redraw()}
-function setCutPosition(s){const q=sliceData(dimension,s);cutPosition=s;$('cutPosition').value=s;draw();return q}
+function chooseOperation(next){stopAuto();if(next==='project')next='collapse';if(!['slice','collapse'].includes(next))throw new Error('Choose Slice or Collapse.');operation=next;cutPointer=null;shadow.clearSelection();syncUi();draw()}
+function chooseShape(name){const n=[2,3,4].find(n=>sliceChoices[n].includes(name));if(!n)throw new Error('Choose a listed shape.');stopAuto();dimension=n;sourceNames[n]=name;orientationIndices[n]=0;cutPosition=0;cutPointer=null;resetOrientation();syncUi();shadow.clearSelection();draw();startAuto()}
+function rotateSlice(){selectPose((poseIndex+1)%poseList.length)}
+function rotateShared(dx,dy){stopAuto();if(dimension===2)rotation=mm4(giv(0,1,(dx-dy)*.01),rotation);else{if(dx)rotation=mm4(giv(0,dimension===4?3:2,-dx*.01),rotation);if(dy)rotation=mm4(giv(1,2,dy*.01),rotation)}freeOrientation=true;shadow.clearSelection();updateRotateLabel();redraw()}
+function cutLimits(){const P=sharedSource().P,axis=dimension===4?3:1,values=P.map(p=>p[axis]);return{min:Math.min(...values),max:Math.max(...values)}}
+function clampCut(){const limits=cutLimits();cutPosition=Math.max(limits.min,Math.min(limits.max,cutPosition));return limits}
+function setCutPosition(s){stopAuto();if(!Number.isFinite(s))throw new Error('Choose a finite cut position.');const limits=cutLimits();cutPosition=Math.max(limits.min,Math.min(limits.max,s));$('cutPosition').value=cutPosition;const q=sliceData();draw();return q}
 const iconPaths={Icosa:'m16 2 13 9-5 17H8L3 11Zm0 0L8 28l21-17H3l21 17Zm-13 9 13 9 13-9M8 28l8-8 8 8',Dodeca:'m16 2 11 6 4 12-9 10H10L1 20 5 8Zm0 6 9 7-3 11H10L7 15Zm0-6v6M5 8l2 7M1 20l9 6m12 4v-4m9-6-6-5m2-7-2 7',Square:'M6 6h20v20H6Z',Triangle:'M16 4 29 27H3Z',Cube:'m16 3 12 7v13l-12 7-12-7V10Zm0 0v13M4 10l12 6 12-6M16 16v14',Tetra:'m16 3 13 22H3Zm0 0v18m-13 4 13-4 13 4',Octa:'m16 2 13 14-13 14L3 16Zm0 0v28M3 16l13-5 13 5-13 5Z',Tesseract:'M3 3h26v26H3ZM10 10h12v12H10ZM3 3l7 7m19-7-7 7m7 19-7-7M3 29l7-7','5-cell':'m16 2 14 10-5 16H7L2 12Zm0 0 9 26L2 12l28 0L7 28Zm-14 10 23 16M16 2 7 28','16-cell':'m16 2 14 14-14 14L2 16Zm0 0v28M2 16h28M16 7l9 9-9 9-9-9Zm0 0v18M7 16h18'};
-function buildShapeIcons(){const holder=$('shapeIcons');if(!holder.children.length){[2,3,4].forEach(n=>sliceChoices[n].forEach(name=>{const b=document.createElement('button');b.type='button';b.className='icon-button';b.dataset.shape=name;b.setAttribute('aria-label',`${pretty(name)}, ${n}D shape`);b.title=`${pretty(name)} · ${n}D`;b.innerHTML=`<svg viewBox="0 0 32 32" aria-hidden="true"><path d="${iconPaths[name]}"/></svg><small aria-hidden="true">${n}D</small>`;b.onclick=()=>chooseShape(name);holder.appendChild(b)}))}for(const b of holder.children){b.setAttribute('aria-pressed',b.dataset.shape===sourceNames[dimension]);b.hidden=false}}
-function updateRotateLabel(){const label=freeOrientation?'Reset view':'Rotate · '+baseModel.orientationName;$('rotateSlice').title=label;$('rotateSlice').setAttribute('aria-label',freeOrientation?'Reset view to '+baseModel.orientationName:'Rotate to the next orientation. Current: '+baseModel.orientationName)}
-function setViewOptions({gap,tilt,perspective}={}){
- if(gap!==undefined){if(!Number.isFinite(gap)||gap<4||gap>64)throw new Error('Gap must be 4–64 pixels.');layerGaps[dimension]=gap}
- if(tilt!==undefined){if(!Number.isFinite(tilt)||tilt<10||tilt>90)throw new Error('Tilt must be 10–90 degrees.');planeTilt=tilt*Math.PI/180}
- if(perspective!==undefined)horizon=!!perspective;syncViewControls();draw();
+function buildShapeIcons(){const holder=$('shapeIcons');if(!holder.children.length){[2,3,4].forEach(n=>sliceChoices[n].forEach(name=>{const b=document.createElement('button');b.type='button';b.className='icon-button';b.dataset.shape=name;b.setAttribute('aria-label',`${pretty(name)}, ${n}D shape`);b.title=`${pretty(name)} · ${n}D`;b.innerHTML=`<svg viewBox="0 0 32 32" aria-hidden="true"><path d="${iconPaths[name]}"/></svg><small aria-hidden="true">${n}D</small>`;b.onclick=()=>name===sourceNames[dimension]?rotateSlice():chooseShape(name);holder.appendChild(b)}))}for(const b of holder.children){b.setAttribute('aria-pressed',b.dataset.shape===sourceNames[dimension]);b.hidden=false}}
+function buildPoseButtons(){
+ const holder=$('poseButtons');if(holder.dataset.shape!==sourceNames[dimension]){holder.dataset.shape=sourceNames[dimension];holder.innerHTML='';poseList.forEach((pose,i)=>{const b=document.createElement('button');b.type='button';b.className='pose-button';b.textContent=pose.label;b.onclick=()=>selectPose(i);holder.appendChild(b)})}
+ for(let i=0;i<holder.children.length;i++){const b=holder.children[i],pose=poseList[i],active=i===poseIndex&&(!freeOrientation||!!motion);b.textContent=operation==='slice'&&pose.spacing?(pose.spacing==='even'?'Even source':'Golden source'):pose.label;b.title=pose.spacing?'Spacing of the original vertices in Collapse.':pose.label;b.setAttribute('aria-pressed',active);b.classList.toggle('cycling',active&&autoPlaying);b.style.setProperty('--progress','0')}
 }
-function planeView(){return presentation==='topdown'?'topdown':horizon?'horizon':'angled'}
-function cyclePlaneView(){if(dimension===2)return;const current=planeView();if(current==='angled'){presentation='topdown';horizon=false}else if(current==='topdown'){presentation='shadow';horizon=true}else{presentation='shadow';horizon=false}syncUi();draw()}
+function updateRotateLabel(){buildPoseButtons()}
+function stopAuto(){
+ if(!autoPlaying&&!motion&&motionFrame===null)return;
+ const interrupted=!!motion;autoPlaying=false;motion=null;if(motionFrame!==null)cancelAnimationFrame(motionFrame);motionFrame=null;if(interrupted)freeOrientation=true;buildPoseButtons();$('poseStatus').textContent='Rotation stopped.';
+}
+function beginPose(index,automatic){
+ poseIndex=((index%poseList.length)+poseList.length)%poseList.length;orientationIndices[dimension]=poseIndex;baseModel.orientationName=poseList[poseIndex].label;const target=poseList[poseIndex].matrix;
+ if(reduce){rotation=target.slice();freeOrientation=false;motion=null;clampCut();buildPoseButtons();draw();return}
+ motion={path:CuratedRotations.rotationPath(rotation,target,dimension),target:target.slice(),start:performance.now(),automatic};freeOrientation=true;buildPoseButtons();
+}
+function selectPose(index){stopAuto();beginPose(index,false);if(motion&&motionFrame===null)motionFrame=requestAnimationFrame(runMotion)}
+function startAuto(){if(reduce)return;autoPlaying=true;holdStart=performance.now();buildPoseButtons();$('poseStatus').textContent=pretty(sourceNames[dimension])+'. '+poseList[poseIndex].label+'.';if(motionFrame===null)motionFrame=requestAnimationFrame(runMotion)}
+function runMotion(now){
+ motionFrame=null;
+ if(motion){const t=Math.max(0,Math.min(1,(now-motion.start)/TURN_MS)),eased=t*t*(3-2*t);rotation=motion.path.at(eased);clampCut();draw();if(t>=1){rotation=motion.target.slice();freeOrientation=false;motion=null;holdStart=now;buildPoseButtons();$('poseStatus').textContent=poseList[poseIndex].label+'.';draw()}}
+ else if(autoPlaying){const progress=Math.max(0,Math.min(1,(now-holdStart)/HOLD_MS));const button=$('poseButtons').children[poseIndex];button?.style.setProperty('--progress',String(progress));if(progress>=1)beginPose((poseIndex+1)%poseList.length,true)}
+ if(autoPlaying||motion)motionFrame=requestAnimationFrame(runMotion);
+}
+const COLOR_PRESETS={
+ teal:{label:'Teal',values:{m2:'#38b9a3',lineColor:'#168675',shadow:'rgba(117,186,174,.82)',shadowBack:'rgba(91,151,143,.82)',glass:'rgba(164,214,202,.085)',solid:'#b5d9d0',source:'#d2e1dc',tick:'#dfebe7'}},
+ blue:{label:'Blue',values:{m2:'#7b9fd8',lineColor:'#426daf',shadow:'rgba(143,164,199,.82)',shadowBack:'rgba(104,128,170,.82)',glass:'rgba(176,195,225,.085)',solid:'#bbccdf',source:'#d6dee8',tick:'#e0e6ef'}},
+ clay:{label:'Clay',values:{m2:'#c49775',lineColor:'#9e6345',shadow:'rgba(191,159,128,.82)',shadowBack:'rgba(154,119,91,.82)',glass:'rgba(219,195,169,.085)',solid:'#d8c5ae',source:'#e3dacf',tick:'#ede4da'}}
+};let palette='teal';
+function buildColorButtons(){const holder=$('colorPresets');if(!holder.children.length)for(const[id,p]of Object.entries(COLOR_PRESETS)){const b=document.createElement('button');b.type='button';b.textContent=p.label;b.dataset.palette=id;b.onclick=()=>choosePalette(id);holder.appendChild(b)}for(const b of holder.children)b.setAttribute('aria-pressed',b.dataset.palette===palette)}
+function choosePalette(id){if(!COLOR_PRESETS[id])throw new Error('Choose a listed color scheme.');stopAuto();palette=id;for(const[key,value]of Object.entries(COLOR_PRESETS[id].values))document.documentElement.style.setProperty('--'+key,value);buildColorButtons();draw()}
+function setViewOptions({gap,stage=dimension,tilt}={}){stopAuto();
+ if(gap!==undefined){if(![2,3,4].includes(stage)||!Number.isFinite(gap)||gap<0||gap>64)throw new Error('Choose a dimension gap from 0–64 pixels.');layerGaps[stage]=gap}
+ if(tilt!==undefined){if(!Number.isFinite(tilt)||tilt<5||tilt>90)throw new Error('Tilt must be 5–90 degrees.');planeTilt=tilt*Math.PI/180}
+ syncViewControls();draw();
+}
 function syncViewControls(){
- $('gapRange').value=layerGaps[dimension];$('gapValue').textContent=layerGaps[dimension]+' px';$('tiltRange').value=planeTilt*180/Math.PI;$('tiltValue').textContent=Math.round(planeTilt*180/Math.PI)+'°';$('tiltRange').disabled=dimension===2||presentation==='topdown';
- const current=planeView(),name={angled:'Angled',topdown:'Top down',horizon:'Horizon'},next={angled:'topdown',topdown:'horizon',horizon:'angled'},paths={angled:'M3 16 12 8 25 13 16 21Z',topdown:'M5 7h18v14H5Z',horizon:'M8 7h12l6 15H2Z'};
- const button=$('planeViewButton');button.hidden=dimension===2;button.dataset.view=current;button.setAttribute('aria-label',`2D view: ${name[current]}. Switch to ${name[next[current]]}.`);button.title=`${name[current]} · switch to ${name[next[current]]}`;button.innerHTML=`<svg viewBox="0 0 28 28" aria-hidden="true"><path d="${paths[current]}"/></svg>`;
+ for(const n of[2,3,4]){$('gapRange'+n).value=layerGaps[n];$('gapValue'+n).textContent=layerGaps[n]+' px';$('gapControl'+n).hidden=dimension<n}
+ $('tiltRange').value=planeTilt*180/Math.PI;$('tiltValue').textContent=Math.round(planeTilt*180/Math.PI)+'°';$('tiltControl').hidden=dimension===2;
 }
 function syncUi(){
  syncViewControls();const four=dimension===4,slicing=operation==='slice';$('operationControls').hidden=false;$('sceneToolbar').classList.toggle('has-operation',true);$('operationSlice').setAttribute('aria-pressed',slicing);$('operationCollapse').setAttribute('aria-pressed',operation==='collapse');$('viewDivider').hidden=!slicing;$('viewDivider').classList.toggle('in-stack',true);$('shadowStage').classList.toggle('has-cutter',slicing);
- $('shadowTitle').textContent=pretty(sourceNames[dimension]);buildShapeIcons();updateRotateLabel();
- $('shadowNote').textContent=(four?'The 4D source is shown in projection. ':'')+(slicing?'Slice intersects the shape at one position. '+(dimension===4?'The 3D cutting space is infinite; dashed edges mark the actual slice.':'The faint guide is a window in an infinite cutting '+(dimension===2?'line.':'plane.'))+' Ticks count slice vertices.':'Collapse drops a coordinate from the whole shape. '+(dimension>2?'Each lower shadow drops another. ':'')+'Ticks count source vertices.');
+ $('shadowTitle').textContent=pretty(sourceNames[dimension]);buildShapeIcons();buildPoseButtons();buildColorButtons();
  $('cutPosition').setAttribute('aria-label',`${dimension-1}D slice position`);
  $('shadowSourceHit').hidden=!four;$('shadowHit').hidden=false;
 }
@@ -752,7 +776,13 @@ function drawSource(f,vertices,edges){const project=v=>projectContext(v,f);if(di
 
 // The highlighted volume is the exact section lifted back into its 4D source.
 function cutterFrame(s){const lift=v=>[...v,s];return{lift,project:(v,f)=>projectContext(lift(v),f)}}
+function drawCutWindow4(f,s){
+ const L=1.02,V=Array.from({length:8},(_,bits)=>[0,1,2].map(k=>(bits&(1<<k)?L:-L))),E=[];
+ for(let i=0;i<8;i++)for(let k=0;k<3;k++){const j=i^(1<<k);if(i<j)E.push([i,j])}
+ const c=f.c;c.save();c.beginPath();c.rect(64,8,f.w-108,Math.max(1,2*(f.oy-8)));c.clip();c.setLineDash([2,5]);graph(c,V,E,p=>cutterFrame(s).project(p,f),css.muted,.13,.65);c.restore();
+}
 function drawSliceSource(f,q){
+ drawCutWindow4(f,cutPosition);
  const lifted=q.verts.map(cutterFrame(cutPosition).lift),project=v=>projectContext(v,f),c=f.c;
  if(q.kind==='polyhedron'){
   c.fillStyle=css.solid;c.globalAlpha=.07;
@@ -761,17 +791,19 @@ function drawSliceSource(f,q){
  }else if(q.kind==='polygon'){path(c,hull2(lifted.map(project)),true);c.fillStyle=css.solid;c.globalAlpha=.13;c.fill();c.globalAlpha=1}
  else if(q.kind==='segment')graph(c,lifted,q.edges,project,css.solid,.3,1);
  else if(q.kind==='point'){c.beginPath();c.arc(...project(lifted[0]),1.5,0,Math.PI*2);c.fillStyle=css.solid;c.fill()}
- // Source edges remain legible through the ghost section; no separate cutter box.
+ // The faint box is only a window in the infinite cutting space; the brighter contour is the exact section.
  drawSource(f,q.source.baseVerts,q.source.edges);
  if(lifted.length>1){c.setLineDash([3,4]);graph(c,lifted,q.edges,project,css.m2,.45,.85);c.setLineDash([])}
 }
-function drawSliceResult(f,q){
- const project=v=>projectResult(v,f),c=f.c;
- if(q.kind==='polyhedron'){
-  c.fillStyle=css.glass;for(const face of q.facets){path(c,face.ids.map(i=>project(q.verts[i])),true);c.fill()}
-  for(const [i,j]of q.edges){const depth=p=>p[1]*Math.sin(CAMERA_E)+p[2]*Math.cos(CAMERA_E),a=edgeAppearance((depth(q.verts[i])+depth(q.verts[j]))/2);graph(c,q.verts,[[i,j]],project,css.solid,a.alpha*.72,a.width)}
- }else fillShape(c,q.verts,q.edges,q.facets,project,.18);
+function drawMesh3(f,mesh){
+ const {verts,edges}=mesh,c=f.c,project=v=>project3(v,f),depth=p=>p[1]*Math.sin(CAMERA_E)+p[2]*Math.cos(CAMERA_E),D=verts.map(depth);
+ const facets=(mesh.facets||[]).map(face=>Array.isArray(face)?face:face.ids);
+ c.fillStyle=css.glass;
+ if(facets.length){facets.map(ids=>({ids,d:ids.reduce((sum,i)=>sum+D[i],0)/ids.length})).sort((a,b)=>a.d-b.d).forEach(face=>{path(c,face.ids.map(i=>project(verts[i])),true);c.fill()})}
+ else if(verts.length>2){path(c,hull2(verts.map(project)),true);c.fill()}
+ for(const[i,j]of edges){const a=edgeAppearance((D[i]+D[j])/2);graph(c,verts,[[i,j]],project,css.solid,a.alpha,a.width)}
 }
+function drawSliceResult(f,q){if(q.kind==='polyhedron')drawMesh3(f,q);else fillShape(f.c,q.verts,q.edges,q.facets,v=>projectResult(v,f),.18)}
 // A whole-object projection uses all source vertices, never a selected cut.
 function projectionHull(points) {
   const P=[],source=[];points.forEach((p,i)=>{const q=p.slice(0,3);if(!P.some(v=>v.every((x,k)=>x===q[k]))){P.push(q);source.push(i);}});const n=P.length;
@@ -840,16 +872,10 @@ function wholeProjection(){
  const verts=P.map(p=>p.slice(0,3)),hull=projectionHull(verts),value={kind:'polyhedron',rank:3,name:'3D shadow',verts,edges:hull.edges,facets:hull.facets,hull,source:{baseVerts:P,edges:S.E}};
  wholeProjectionCache={key,value};return value;
 }
-function drawProjectedResult(f,q){
- const c=f.c,ce=Math.cos(CAMERA_E),se=Math.sin(CAMERA_E),depth=p=>p[1]*se+p[2]*ce,view=[0,se,ce],light=[-.45,.65,.61],dot=(a,b)=>a.reduce((s,x,i)=>s+x*b[i],0),edges=new Map();
- const faces=q.facets.filter(face=>dot(face.normal,view)>1e-12).sort((a,b)=>a.ids.reduce((v,i)=>v+depth(q.verts[i]),0)/a.ids.length-b.ids.reduce((v,i)=>v+depth(q.verts[i]),0)/b.ids.length);
- for(const face of faces){path(c,face.ids.map(i=>projectResult(q.verts[i],f)),true);c.fillStyle=css.bg;c.fill();c.fillStyle=css.solid;c.globalAlpha=.12+.1*Math.max(0,dot(face.normal,light));c.fill();c.globalAlpha=1;face.ids.forEach((i,k)=>{const j=face.ids[(k+1)%face.ids.length],key=i<j?i+','+j:j+','+i;edges.set(key,[i,j])})}
- graph(c,q.verts,[...edges.values()],v=>projectResult(v,f),css.solid,.58,1.05);
-}
+function drawProjectedResult(f,q){drawMesh3(f,q)}
 const SAMPLE_POSITIONS=[-.5,-.25,0,.25,.5];
-const perspective4=p=>p.slice(0,3).map(x=>Math.sqrt(5.25)*x/(2.5-p[3]));
 function edgeAppearance(depth){const t=(Math.max(-1,Math.min(1,depth))+1)/2;return{width:.85+.55*t,alpha:.2+.55*t}}
-function bindRotation(el){let drag=null;el.addEventListener('pointerdown',e=>{if(e.isPrimary===false||e.button>0)return;drag={id:e.pointerId,x:e.clientX,y:e.clientY};el.setPointerCapture(e.pointerId);el.focus({preventScroll:true});e.preventDefault()});el.addEventListener('pointermove',e=>{if(!drag||drag.id!==e.pointerId)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;drag.x=e.clientX;drag.y=e.clientY;rotateShared(dx,dy);e.preventDefault()});['pointerup','pointercancel','lostpointercapture'].forEach(t=>el.addEventListener(t,e=>{if(drag?.id===e.pointerId)drag=null}));el.addEventListener('keydown',e=>{const keys={ArrowLeft:[-12,0],ArrowRight:[12,0],ArrowUp:[0,-12],ArrowDown:[0,12]};if(e.key==='Home'){e.preventDefault();resetOrientation();syncUi();draw()}else if(keys[e.key]){e.preventDefault();rotateShared(...keys[e.key])}})}
+function bindRotation(el){let drag=null;el.addEventListener('pointerdown',e=>{stopAuto();if(e.isPrimary===false||e.button>0)return;drag={id:e.pointerId,x:e.clientX,y:e.clientY};el.setPointerCapture(e.pointerId);el.focus({preventScroll:true});e.preventDefault()});el.addEventListener('pointermove',e=>{if(!drag||drag.id!==e.pointerId)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;drag.x=e.clientX;drag.y=e.clientY;rotateShared(dx,dy);e.preventDefault()});['pointerup','pointercancel','lostpointercapture'].forEach(t=>el.addEventListener(t,e=>{if(drag?.id===e.pointerId)drag=null}));el.addEventListener('keydown',e=>{const keys={ArrowLeft:[-12,0],ArrowRight:[12,0],ArrowUp:[0,-12],ArrowDown:[0,12]};if(e.key==='Home'){e.preventDefault();stopAuto();resetOrientation();syncUi();draw()}else if(keys[e.key]){e.preventDefault();rotateShared(...keys[e.key])}})}
 // Strict numerical validation is used only after checking curated provenance.
 // These labels describe ratios to the smallest displayed gap, not distances.
 function spacingCue({gaps}, {freeOrientation, dimension, cutPosition = 0,
@@ -872,17 +898,10 @@ function spacingCue({gaps}, {freeOrientation, dimension, cutPosition = 0,
 
 const visualBoundsCache=new Map();
 function shapeVisualBounds(name,n,k){
- const key=n+':'+name;let data=visualBoundsCache.get(key);
- if(!data){
-  if(n===4){const model=sliceModel(name,4),sets=[];for(let i=0;i<model.orientationCount;i++){const m=sliceModel(name,4,i),M=orientationFor(m,4);sets.push(m.rawV.map(p=>mul4(M,p)))}data={sets};}
-  else data={vertices:sliceModel(name,n).rawV};visualBoundsCache.set(key,data);
- }
- const ce=Math.cos(CAMERA_E),se=Math.sin(CAMERA_E),h=CONTEXT_W*ce;
- if(n===4){let source=0,body=0,first=0,joint=0;for(const P of data.sets)for(const p of P){const r=Math.hypot(p[1],p[2]);source=Math.max(source,r+h*Math.hypot(p[0],p[3]));body=Math.max(body,r);for(const q of P){first=Math.max(first,Math.hypot(p[1]-q[1],p[2]-q[2])+h*Math.hypot(p[0],p[3]));joint=Math.max(joint,Math.hypot(-ce*p[1]+se*p[2]-k*q[2],ce*p[2]+se*p[1]-k*q[1]))}}
-  return{source,body,first,joint};
- }
- let joint=1+k;if(n===3){joint=0;for(const p of data.vertices)for(const q of data.vertices){const d=Math.max(-1,Math.min(1,p.reduce((v,x,i)=>v+x*q[i],0)));joint=Math.max(joint,Math.sqrt(Math.max(0,1+k*k-2*d*k*se+2*k*ce*Math.sqrt(Math.max(0,1-d*d)))))} }
- return{source:1,body:1,first:2,joint};
+ const key=n+':'+name;let V=visualBoundsCache.get(key);if(!V){V=sliceModel(name,n).rawV;visualBoundsCache.set(key,V)}
+ const ce=Math.cos(CAMERA_E),se=Math.sin(CAMERA_E),h=CONTEXT_W*ce;let joint=1+k,first=2;
+ if(n>=3){joint=0;first=0;for(const p of V)for(const q of V){const d=Math.max(-1,Math.min(1,p.reduce((sum,x,i)=>sum+x*q[i],0))),cross=Math.sqrt(Math.max(0,1-d*d));joint=Math.max(joint,Math.sqrt(Math.max(0,1+k*k-2*d*k*se+2*k*ce*cross)));first=Math.max(first,Math.sqrt(Math.max(0,2+h*h-2*d+2*h*cross)))}}
+ return{source:n===4?Math.hypot(1,h):1,body:1,first,joint};
 }
 function createShadowExplorer(){
  const cv=$('shadowCanvas'),ctx=cv.getContext('2d'),hit=$('shadowHit');
@@ -892,18 +911,16 @@ function createShadowExplorer(){
  // Layout depends on viewport, dimension and explicit presentation only.
  // All shapes have unit circumradius; every section remains inside that ball.
  function layout(){
-  W=cv.clientWidth||800;const LW=W>=560?72:64,right=44,avail=W-LW-right,angle=presentation==='topdown'?Math.PI/2:planeTilt,k=Math.sin(angle),perspective=horizon&&presentation!=='topdown'&&S.dim>2,depth=perspective?.25*Math.cos(angle):0,b=shapeVisualBounds(S.name,S.dim,k),gap=layerGaps[S.dim];
-  R=Math.max(32,Math.min(136,(avail/2-8)*Math.sqrt(1-depth*depth)));const o={LW,ox:LW+avail/2,planeScale:k,planeDepth:depth,planeRadius:b.body,bodyBound:b.body,sourceBound:b.source,gap};
-  if(S.dim===4){o.sourceTop=8;o.sourceY=8+b.source*R;o.oy3=o.sourceY+b.first*R+gap;o.top3=o.oy3-b.body*R;}
-  else{o.top3=16+(S.dim===2?.2*R:0);o.oy3=o.top3+R;}
-  const back=k*b.body/(1+depth*b.body),front=k*b.body/(1-depth*b.body);
-  o.planeY=o.oy3+(perspective?b.body+back:b.joint)*R+gap;o.planeBack=o.planeY-back*R;o.planeFront=o.planeY+front*R;
-  o.strip=S.dim===2?o.oy3+R+gap:o.planeFront+gap;H=o.strip+112;return o;
+  W=cv.clientWidth||800;const LW=W>=560?72:64,right=44,avail=W-LW-right,k=Math.sin(planeTilt),b=shapeVisualBounds(S.name,S.dim,k);
+  R=Math.max(32,Math.min(136,avail/2-8));const o={LW,ox:LW+avail/2,planeScale:k,planeDepth:0,planeRadius:b.body,bodyBound:b.body,sourceBound:b.source,gaps:{...layerGaps}};
+  if(S.dim===4){o.sourceTop=8;o.sourceY=8+b.source*R;o.oy3=o.sourceY+b.first*R+layerGaps[4];o.top3=o.oy3-b.body*R;}
+  else{o.top3=16;o.oy3=o.top3+R;}
+  o.planeY=o.oy3+b.joint*R+layerGaps[3];o.planeBack=o.planeY-k*R;o.planeFront=o.planeY+k*R;
+  o.strip=S.dim===2?o.oy3+R+layerGaps[2]:o.planeFront+layerGaps[2];H=o.strip+76;return o;
  }
- function resize(){lay=layout();if(S.dim>2){$('planeViewButton').style.top=(lay.planeY-22)+'px';$('planeViewButton').hidden=false;}const d=Math.min(2,devicePixelRatio||1);cv.style.height=H+'px';if(cv.width!==Math.round(W*d)||cv.height!==Math.round(H*d)){cv.width=Math.round(W*d);cv.height=Math.round(H*d)}ctx.setTransform(d,0,0,d,0,0);if(S.dim!==4)compactFrames={source:{c:ctx,w:W,h:H,R,ox:lay.ox,oy:lay.oy3},result:{c:ctx,w:W,h:H,R,ox:lay.ox,oy:S.dim===3?lay.planeY:lay.strip},planeY:lay.planeY,H};const side=2*R;hit.style.width=hit.style.height=side+'px';hit.style.left=(lay.ox-side/2)+'px';hit.style.top=(lay.oy3-side/2)+'px';if(S.dim===4){const height=2*lay.sourceBound*R;sourceHit.style.width=side+'px';sourceHit.style.height=height+'px';sourceHit.style.left=(lay.ox-side/2)+'px';sourceHit.style.top=lay.sourceTop+'px'}}
- const PX=x=>lay.ox+R*x,PY=(y,z)=>lay.oy3-R*(y*CE-z*SE),planePoint=(x,z)=>{const d=1-lay.planeDepth*z;return[lay.ox+R*x/d,lay.planeY+R*lay.planeScale*z/d]},SHY=z=>planePoint(0,z)[1],DEP=(y,z)=>y*SE+z*CE;
+ function resize(){lay=layout();const d=Math.min(2,devicePixelRatio||1);cv.style.height=H+'px';if(cv.width!==Math.round(W*d)||cv.height!==Math.round(H*d)){cv.width=Math.round(W*d);cv.height=Math.round(H*d)}ctx.setTransform(d,0,0,d,0,0);if(S.dim!==4)compactFrames={source:{c:ctx,w:W,h:H,R,ox:lay.ox,oy:lay.oy3},result:{c:ctx,w:W,h:H,R,ox:lay.ox,oy:S.dim===3?lay.planeY:lay.strip},planeY:lay.planeY,H};const side=2*R;hit.style.width=hit.style.height=side+'px';hit.style.left=(lay.ox-side/2)+'px';hit.style.top=(lay.oy3-side/2)+'px';if(S.dim===4){const height=2*lay.sourceBound*R;sourceHit.style.width=side+'px';sourceHit.style.height=height+'px';sourceHit.style.left=(lay.ox-side/2)+'px';sourceHit.style.top=lay.sourceTop+'px'}}
+ const PX=x=>lay.ox+R*x,PY=(y,z)=>lay.oy3-R*(y*CE-z*SE),planePoint=(x,z)=>[lay.ox+R*x,lay.planeY+R*lay.planeScale*z],SHY=z=>planePoint(0,z)[1],DEP=(y,z)=>y*SE+z*CE;
 function lblock(center,title,lines){
-  if(title==='2D'&&dimension>2)$('planeViewButton').style.top=(center-22)+'px';
   const total=13+15*lines.length;let y=center-total/2+11;
   ctx.textAlign='left';ctx.fillStyle=css.ink;ctx.font='600 13px ui-monospace, monospace';ctx.fillText(title,16,y);y+=15;
   ctx.font='400 11px ui-monospace, monospace';ctx.fillStyle=css.muted;
@@ -923,37 +940,26 @@ function compute(){
   return {P,n,groups,gOf,exact,even,gaps,live};
 }
  function drawLine(C){
-  const {groups}=C;if(!groups.length)return;
-  const cue=spacingCue(C,{freeOrientation,dimension,operation,cutPosition,criticalLevels:operation==='slice'?selectedModel().criticalLevels:[]}),sY=lay.strip,unit=4,maxHeight=Math.max(...groups.map(g=>unit*g.idx.length));
-  ctx.strokeStyle=css.lineColor;ctx.lineWidth=3;ctx.lineCap='butt';ctx.globalAlpha=1;ctx.beginPath();ctx.moveTo(PX(groups[0].x),sY);ctx.lineTo(PX(groups.at(-1).x),sY);ctx.stroke();
-  // A point-degenerate projection is a short vertical mark, not a fictitious interval.
-  if(groups.length===1){ctx.beginPath();ctx.moveTo(PX(groups[0].x),sY-1.5);ctx.lineTo(PX(groups[0].x),sY+1.5);ctx.stroke()}
-  groups.forEach((g,i)=>{const x=PX(g.x),height=unit*g.idx.length,on=i===sel;ctx.strokeStyle=css.tick;ctx.globalAlpha=sel>=0?(on?.8:.16):.3;ctx.lineWidth=on?2:1.25;ctx.beginPath();ctx.moveTo(x,sY+6);ctx.lineTo(x,sY+6+height);ctx.stroke()});ctx.globalAlpha=1;
-  if(cue){const y=sY+maxHeight+23;ctx.strokeStyle=ctx.fillStyle=css.m2;ctx.globalAlpha=.7;ctx.lineWidth=1;ctx.font='500 11px ui-monospace, monospace';ctx.textAlign='center';for(let i=1;i<groups.length;i++){const x0=PX(groups[i-1].x)+3,x1=PX(groups[i].x)-3;if(x1-x0<23)continue;ctx.beginPath();ctx.moveTo(x0,y-3);ctx.lineTo(x0,y);ctx.lineTo(x1,y);ctx.lineTo(x1,y-3);ctx.stroke();ctx.fillText(cue.labels[i-1],(x0+x1)/2,y+14)}ctx.globalAlpha=1;ctx.fillStyle=css.muted;ctx.textAlign='left';ctx.font='400 10px ui-monospace, monospace';ctx.fillText('ratios',16,y+14)}
-  if(sel>=0&&groups[sel]){const count=groups[sel].idx.length;ctx.fillStyle=css.muted;ctx.textAlign='center';ctx.font='400 11px ui-monospace, monospace';ctx.fillText(`${count} ${operation==='slice'?'slice ':dimension===4?'source ':''}${count===1?'vertex':'vertices'}`,PX(groups[sel].x),sY+maxHeight+(cue?59:24))}
-  return{cue,heights:groups.map(g=>unit*g.idx.length)};
+  const {groups}=C;if(!groups.length)return;const cue=spacingCue(C,{freeOrientation,dimension,operation,cutPosition,criticalLevels:operation==='slice'?selectedModel().criticalLevels:[]}),sY=lay.strip;
+  ctx.strokeStyle=css.lineColor;ctx.fillStyle=css.lineColor;ctx.lineWidth=3;ctx.globalAlpha=1;ctx.beginPath();ctx.moveTo(PX(groups[0].x),sY);ctx.lineTo(PX(groups.at(-1).x),sY);ctx.stroke();
+  if(groups.length===1){ctx.beginPath();ctx.arc(PX(groups[0].x),sY,1.5,0,2*Math.PI);ctx.fill()}
+  groups.forEach((g,i)=>{const radius=1.15*Math.sqrt(g.idx.length);ctx.fillStyle=css.tick;ctx.globalAlpha=sel>=0?(sel===i?.65:.2):.3;ctx.beginPath();ctx.arc(PX(g.x),sY+9,radius,0,Math.PI*2);ctx.fill()});ctx.globalAlpha=1;
+  if(cue){const y=sY+24;ctx.strokeStyle=ctx.fillStyle=css.m2;ctx.globalAlpha=.65;ctx.lineWidth=.8;ctx.font='500 11px ui-monospace, monospace';ctx.textAlign='center';for(let i=1;i<groups.length;i++){const x0=PX(groups[i-1].x)+3,x1=PX(groups[i].x)-3;if(x1-x0<23)continue;ctx.beginPath();ctx.moveTo(x0,y-3);ctx.lineTo(x0,y);ctx.lineTo(x1,y);ctx.lineTo(x1,y-3);ctx.stroke();ctx.fillText(cue.labels[i-1],(x0+x1)/2,y+14)}ctx.globalAlpha=1}
+  if(sel>=0&&groups[sel]){const count=groups[sel].idx.length;ctx.fillStyle=css.muted;ctx.textAlign='center';ctx.font='400 11px ui-monospace, monospace';ctx.fillText(`${count} ${operation==='slice'?'slice ':dimension===4?'source ':''}${count===1?'vertex':'vertices'}`,PX(groups[sel].x),sY+(cue?59:31))}
+  return{cue,radii:groups.map(g=>1.15*Math.sqrt(g.idx.length))};
  }
 function planeFill(){const back=planePoint(0,-lay.planeRadius),front=planePoint(0,lay.planeRadius),gradient=ctx.createLinearGradient(...back,...front);gradient.addColorStop(0,css.shadowBack);gradient.addColorStop(1,css.shadow);return gradient}
 function paintSilhouette(points){if(points.length<3)return;path(ctx,points.map(p=>planePoint(p[0],p[2])),true);ctx.globalAlpha=1;ctx.fillStyle=css.bg;ctx.fill();ctx.fillStyle=planeFill();ctx.fill()}
-function drawThreeBody(C){const {P}=C;
-  const dep=P.map(p=>DEP(p[1],p[2]));ctx.fillStyle=css.glass;
-  if(S.F){S.F.map(f=>[f,f.reduce((s,i)=>s+dep[i],0)/f.length]).sort((a,b)=>a[1]-b[1]).forEach(([f])=>{ctx.beginPath();f.forEach((i,k)=>{const X=PX(P[i][0]),Y=PY(P[i][1],P[i][2]);k?ctx.lineTo(X,Y):ctx.moveTo(X,Y)});ctx.closePath();ctx.fill()})}
-  else{const sp=P.map(p=>[PX(p[0]),PY(p[1],p[2])]).sort((a,b)=>a[0]-b[0]||a[1]-b[1]),cr=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]),lo=[],up=[];
-    for(const p of sp){while(lo.length>1&&cr(lo[lo.length-2],lo[lo.length-1],p)<=0)lo.pop();lo.push(p)}
-    for(let i=sp.length-1;i>=0;i--){const p=sp[i];while(up.length>1&&cr(up[up.length-2],up[up.length-1],p)<=0)up.pop();up.push(p)}
-    const hh=lo.slice(0,-1).concat(up.slice(0,-1));ctx.beginPath();hh.forEach((p,k)=>k?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.closePath();ctx.fill()}
-  const cell=new Set(S.dim===4?S.cells[selectedCell]:[]);
-  for(const [i,j]of S.E.slice().sort((a,b)=>Number(cell.has(a[0])&&cell.has(a[1]))-Number(cell.has(b[0])&&cell.has(b[1])))){const appearance=edgeAppearance((dep[i]+dep[j])/2),highlight=cell.has(i)&&cell.has(j);ctx.strokeStyle=highlight?css.m2:css.solid;ctx.lineWidth=appearance.width;ctx.globalAlpha=appearance.alpha*(sel>=0?.6:1);ctx.beginPath();ctx.moveTo(PX(P[i][0]),PY(P[i][1],P[i][2]));ctx.lineTo(PX(P[j][0]),PY(P[j][1],P[j][2]));ctx.stroke()}ctx.globalAlpha=1;
- }
+function drawThreeBody(C){drawMesh3({c:ctx,w:W,h:H,R,ox:lay.ox,oy:lay.oy3},{verts:C.P,edges:S.E,facets:S.F})}
 function drawLowerSlice(sourceData){
  const C=sectionProjection(),q=C.section,{P,groups}=C,f=compactFrames.source;
- ctx.clearRect(0,0,W,H);$('planeViewButton').hidden=dimension===2||!P.length;if(sel>=groups.length)sel=-1;
+ ctx.clearRect(0,0,W,H);if(sel>=groups.length)sel=-1;
  // A bounded drawing window in the infinite cutter. It never clips the geometry.
  ctx.save();ctx.beginPath();ctx.rect(lay.LW,lay.top3-4,W-lay.LW-44,2*R+8);ctx.clip();
  const lift=cutterFrame(cutPosition),project=p=>lift.project(p,f);
  ctx.setLineDash([3,5]);ctx.strokeStyle=css.muted;ctx.globalAlpha=.26;ctx.lineWidth=.8;
  if(dimension===2){const a=project([-1.12]),b=project([1.12]);path(ctx,[a,b]);ctx.stroke()}
- else{const window=[[-1.1,-1.1],[1.1,-1.1],[1.1,1.1],[-1.1,1.1]];path(ctx,window.map(project),true);ctx.fillStyle=css.solid;ctx.globalAlpha=.025;ctx.fill();ctx.globalAlpha=.24;ctx.stroke()}
+ else{const window=[[-3,-.55],[3,-.55],[3,1.1],[-3,1.1]];path(ctx,window.map(project),true);ctx.fillStyle=css.solid;ctx.globalAlpha=.025;ctx.fill()}
  ctx.restore();
  if(dimension===3)drawThreeBody(sourceData);else{const xy=p=>[PX(p[0]),lay.oy3-R*p[1]];path(ctx,hull2(sourceData.P.map(xy)),true);ctx.fillStyle=css.shadow;ctx.fill();graph(ctx,sourceData.P,S.E,xy,css.solid,.16,1)}
  if(q.verts.length){
@@ -970,7 +976,7 @@ function drawLowerSlice(sourceData){
   ctx.setLineDash([]);ctx.globalAlpha=1;drawLine(C);lblock(lay.strip,'1D',dimension===2?['slice']:[]);
  }
  lblock(lay.oy3,dimension+'D',[]);$('viewDivider').style.height=(lay.oy3+R)+'px';$('viewDivider').style.top='0px';
- cv.setAttribute('aria-label',`${pretty(S.name)}, ${dimension}D source and its exact ${q.name||'empty'} ${dimension-1}D slice${dimension===3?', followed by its line shadow':''}. The cutter extends beyond its display window. Tick counts: ${C.live.join(', ')}.`);
+ cv.setAttribute('aria-label',`${pretty(S.name)}, ${dimension}D source and its exact ${q.name||'empty'} ${dimension-1}D slice${dimension===3?', followed by its line shadow':''}. The cutter extends beyond its display window. Dot multiplicities: ${C.live.join(', ')}.`);
  $('cutPosition').setAttribute('aria-valuetext',`${cutPosition.toFixed(2)} along the cut direction; ${q.name||'no intersection'}.`);syncCutThumb();return C;
 }
 function drawFlat(C){const {P,groups,gOf}=C,xy=p=>[PX(p[0]),lay.oy3-R*p[1]];
@@ -982,8 +988,8 @@ function sectionProjection(){
  const gaps=groups.slice(1).map((g,i)=>g.x-groups[i].x),even=gaps.length<2||gaps.every(g=>Math.abs(g-gaps[0])<EPS);return{section,P,n:P.length,groups,gOf,gaps,even,exact:true,live:groups.map(g=>g.idx.length)};
 }
 function drawSectionShadows(){
- const C=sectionProjection(),{P,groups,section:q}=C;resize();$('planeViewButton').hidden=!P.length;ctx.clearRect(0,0,W,H);
- const source={c:ctx,w:W,h:H,R,ox:lay.ox,oy:lay.sourceY},result={c:ctx,w:W,h:H,R,ox:lay.ox,oy:lay.oy3};compactFrames={source,result,planeY:lay.planeY,H,bound4:lay.sourceBound,planeScale:lay.planeScale,planeDepth:lay.planeDepth,gap:lay.gap};
+ const C=sectionProjection(),{P,groups,section:q}=C;resize();ctx.clearRect(0,0,W,H);
+ const source={c:ctx,w:W,h:H,R,ox:lay.ox,oy:lay.sourceY},result={c:ctx,w:W,h:H,R,ox:lay.ox,oy:lay.oy3};compactFrames={source,result,planeY:lay.planeY,H,bound4:lay.sourceBound,planeScale:lay.planeScale,planeDepth:lay.planeDepth,gaps:lay.gaps};
  const divider=$('viewDivider');divider.style.height=(lay.sourceY+lay.sourceBound*R)+'px';divider.style.top='0px';
  if(sel>=groups.length)sel=-1;
  // Correspondence links an actual section vertex or the same original source vertex.
@@ -1002,7 +1008,7 @@ function drawSectionShadows(){
   lblock(lay.oy3,'3D',[operation==='collapse'?'shadow':q.rank===3?'slice':'section']);lblock(lay.planeY,'2D',[]);lblock(lay.strip,'1D',[]);
  }
  lblock(lay.sourceY,'4D',['projected']);
- cv.setAttribute('aria-label',operation==='slice'?`Projected ${pretty(S.name)} and its actual ${q.name||'empty'} slice, followed by shadows of that slice. Tick height counts coincident slice vertices: ${C.live.join(', ')}.`:`Projected ${pretty(S.name)}, its whole-object 3D shadow, then 2D and 1D shadows. Tick height counts original source vertices at each line position: ${C.live.join(', ')}.`);
+ cv.setAttribute('aria-label',operation==='slice'?`Projected ${pretty(S.name)} and its actual ${q.name||'empty'} slice, followed by shadows of that slice. The faint box outlines a finite window of the infinite 3D cutting space. Dot area represents coincident slice vertices: ${C.live.join(', ')}.`:`Projected ${pretty(S.name)}, its whole-object 3D shadow, then 2D and 1D shadows. Dot area represents original source vertices at each line position: ${C.live.join(', ')}.`);
  $('cutPosition').setAttribute('aria-valuetext',`${cutPosition.toFixed(2)} along the fourth spatial direction; ${q.name||'no intersection'}.`);if(operation==='slice')syncCutThumb();return C;
 }
 
@@ -1012,7 +1018,7 @@ function draw(){
   const q=x=>Math.round(x*1e5),groups3=projectionGroups(P,[0,1,2]),groups2=projectionGroups(P,[0,2]),map2=new Map();
   groups2.forEach((g,i)=>{const p=P[g.idx[0]];map2.set(q(p[0])+','+q(p[2]),{x:p[0],z:p[2],c:g.idx.length,g:gOf[g.idx[0]]})});
   const n3=groups3.length,n2=groups2.length,n1=groups.length;
-  cv.setAttribute('aria-label',`${FULL[S.name]||S.name}. ${S.dim===4?'4D source diagram, then its 3D shadow':S.dim===3?'3D source':'2D source'}, then ${S.dim>2?'a 2D shadow and ':''}a line. ${n3} positions in 3D, ${n2} in 2D, ${n1} on the line. Tick heights count coincident vertices: ${groups.map(g=>g.idx.length).join(', ')} from left to right.`);
+  cv.setAttribute('aria-label',`${FULL[S.name]||S.name}. ${S.dim===4?'4D source diagram, then its 3D shadow':S.dim===3?'3D source':'2D source'}, then ${S.dim>2?'a 2D shadow and ':''}a line. ${n3} positions in 3D, ${n2} in 2D, ${n1} on the line. Dot area represents coincident vertices: ${groups.map(g=>g.idx.length).join(', ')} from left to right.`);
   const gcol=i=>col(groups[gOf[i]].idx.length),off=i=>sel>=0&&gOf[i]!==sel;
   ctx.clearRect(0,0,W,H);
   if(S.dim===2){drawFlat(C);return C;}
@@ -1052,29 +1058,26 @@ function draw(){
 
 
  bindRotation(hit);bindRotation(sourceHit);
- cv.addEventListener('click',e=>{const r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;if(Math.abs(y-lay.strip)<32){let best=-1,dist=22;(dimension===4||operation==='slice'?sectionProjection():compute()).groups.forEach((g,i)=>{const d=Math.abs(PX(g.x)-x);if(d<dist){dist=d;best=i}});sel=best===sel?-1:best}else sel=-1;draw()});
- return{draw,planePoint,frames:()=>compactFrames,setShape:chooseShape,turn:rotateShared,reset:()=>{resetOrientation();syncUi();draw()},clearSelection:()=>{sel=-1},inspect:()=>({...compute(),S,M:rotation,lay,R,sel,perspective:sharedSource().P.map(perspective4),resultChain:dimension===4||operation==='slice'?sectionProjection():null,sectionChain:operation==='slice'?sectionProjection():null})};
+ cv.addEventListener('click',e=>{stopAuto();const r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;if(Math.abs(y-lay.strip)<32){let best=-1,dist=22;(dimension===4||operation==='slice'?sectionProjection():compute()).groups.forEach((g,i)=>{const d=Math.abs(PX(g.x)-x);if(d<dist){dist=d;best=i}});sel=best===sel?-1:best}else sel=-1;draw()});
+ return{draw,planePoint,frames:()=>compactFrames,setShape:chooseShape,turn:rotateShared,reset:()=>{resetOrientation();syncUi();draw()},clearSelection:()=>{sel=-1},inspect:()=>({...compute(),S,M:rotation,lay,R,sel,resultChain:dimension===4||operation==='slice'?sectionProjection():null,sectionChain:operation==='slice'?sectionProjection():null})};
 }
-function draw(){readCss();return shadow.draw()}
+function draw(){readCss();clampCut();return shadow.draw()}
 function redraw(){if(queued)return;queued=true;requestAnimationFrame(()=>{queued=false;draw()})}
 function cutControlGeometry(){const f=$('shadowCanvas').getBoundingClientRect(),d=$('viewDivider').getBoundingClientRect(),m=shadow.frames().source;return{centerY:f.top+m.oy,scale:m.R*(dimension===2?1:Math.cos(CAMERA_E)*(dimension===4?CONTEXT_W:1)),dividerTop:d.top,centerX:d.left+d.width/2}}
-function syncCutThumb(){const g=cutControlGeometry();const top=g.centerY-g.dividerTop-g.scale*1.2,height=g.scale*2.4;for(const el of [$('dividerRule'),$('cutPosition')]){el.style.top=top+'px';el.style.height=height+'px'}$('cutThumb').style.top=(g.centerY-g.dividerTop-g.scale*cutPosition)+'px'}
-function cutFromY(y){const g=cutControlGeometry();const value=Math.max(-1.2,Math.min(1.2,(g.centerY-y)/g.scale)),nearest=selectedModel().criticalLevels.reduce((best,s)=>Math.abs(s-value)<Math.abs(best-value)?s:best,Infinity);return Math.abs(nearest-value)*g.scale<=3?nearest:Math.round(value*10000)/10000}
+function syncCutThumb(){const g=cutControlGeometry(),limits=clampCut(),top=g.centerY-g.dividerTop-g.scale*limits.max,height=g.scale*(limits.max-limits.min);for(const el of[$('dividerRule'),$('cutPosition')]){el.style.top=top+'px';el.style.height=height+'px'}$('cutPosition').min=limits.min;$('cutPosition').max=limits.max;$('cutPosition').value=cutPosition;$('cutThumb').style.top=(g.centerY-g.dividerTop-g.scale*cutPosition)+'px'}
+function cutFromY(y){const g=cutControlGeometry(),limits=cutLimits(),value=Math.max(limits.min,Math.min(limits.max,(g.centerY-y)/g.scale)),nearest=selectedModel().criticalLevels.reduce((best,s)=>Math.abs(s-value)<Math.abs(best-value)?s:best,Infinity);return Math.abs(nearest-value)*g.scale<=3?nearest:value}
 const input=$('cutPosition');
-input.addEventListener('pointerdown',e=>{if(operation!=='slice'||e.isPrimary===false||e.button>0||cutPointer!==null)return;const g=cutControlGeometry(),y=g.centerY-g.scale*cutPosition,grab=Math.abs(e.clientX-g.centerX)<=10&&Math.abs(e.clientY-y)<=10;cutGrabOffset=grab?e.clientY-y:0;cutPointer=e.pointerId;input.focus({preventScroll:true});input.setPointerCapture(e.pointerId);e.preventDefault();if(!grab)setCutPosition(cutFromY(e.clientY))});
+input.addEventListener('pointerdown',e=>{stopAuto();if(operation!=='slice'||e.isPrimary===false||e.button>0||cutPointer!==null)return;const g=cutControlGeometry(),y=g.centerY-g.scale*cutPosition,grab=Math.abs(e.clientX-g.centerX)<=10&&Math.abs(e.clientY-y)<=10;cutGrabOffset=grab?e.clientY-y:0;cutPointer=e.pointerId;input.focus({preventScroll:true});input.setPointerCapture(e.pointerId);e.preventDefault();if(!grab)setCutPosition(cutFromY(e.clientY))});
 input.addEventListener('pointermove',e=>{if(cutPointer!==e.pointerId)return;e.preventDefault();setCutPosition(cutFromY(e.clientY-cutGrabOffset))});
 ['pointerup','pointercancel','lostpointercapture'].forEach(t=>input.addEventListener(t,e=>{if(cutPointer===e.pointerId){cutPointer=null;cutGrabOffset=0}}));
 input.oninput=e=>setCutPosition(Number(e.target.value));
-input.addEventListener('keydown',e=>{const steps={ArrowUp:.01,ArrowRight:.01,ArrowDown:-.01,ArrowLeft:-.01,PageUp:.2,PageDown:-.2};if(e.key==='Home'||e.key==='End'||e.key in steps){e.preventDefault();const v=e.key==='Home'?-1.2:e.key==='End'?1.2:cutPosition+steps[e.key];const target=Math.round(Math.max(-1.2,Math.min(1.2,v))*100)/100,dir=Math.sign(target-cutPosition),crossed=selectedModel().criticalLevels.filter(s=>dir*(s-cutPosition)>1e-10&&dir*(target-s)>=0).sort((a,b)=>dir*(a-b));setCutPosition((e.key==='Home'||e.key==='End')?target:crossed[0]??target)}});
+input.addEventListener('keydown',e=>{const steps={ArrowUp:.01,ArrowRight:.01,ArrowDown:-.01,ArrowLeft:-.01,PageUp:.1,PageDown:-.1};if(e.key==='Home'||e.key==='End'||e.key in steps){e.preventDefault();const limits=cutLimits(),target=e.key==='Home'?limits.min:e.key==='End'?limits.max:Math.max(limits.min,Math.min(limits.max,cutPosition+steps[e.key])),dir=Math.sign(target-cutPosition),crossed=selectedModel().criticalLevels.filter(s=>dir*(s-cutPosition)>1e-10&&dir*(target-s)>=0).sort((a,b)=>dir*(a-b));setCutPosition((e.key==='Home'||e.key==='End')?target:crossed[0]??target)}});
 
-$('gapRange').oninput=e=>setViewOptions({gap:Number(e.target.value)});$('tiltRange').oninput=e=>setViewOptions({tilt:Number(e.target.value)});$('resetViewControls').onclick=()=>{layerGaps[dimension]=defaultGaps[dimension];planeTilt=CAMERA_E;syncViewControls();draw()};
-$('rotateSlice').onclick=rotateSlice;
+for(const n of[2,3,4])$('gapRange'+n).oninput=e=>setViewOptions({gap:Number(e.target.value),stage:n});$('tiltRange').oninput=e=>setViewOptions({tilt:Number(e.target.value)});
 $('operationSlice').onclick=()=>chooseOperation('slice');$('operationCollapse').onclick=()=>chooseOperation('collapse');
-$('planeViewButton').onclick=cyclePlaneView;
 new ResizeObserver(()=>redraw()).observe($('shadowStage'));
 if(document.modelContext?.registerTool){const life=new AbortController(),reg=t=>{try{Promise.resolve(document.modelContext.registerTool(t,{signal:life.signal})).catch(()=>{})}catch{}};
  reg({name:'set_operation',description:'Choose an exact one-dimension-lower slice or collapse the whole shape by dropping a coordinate.',inputSchema:{type:'object',properties:{operation:{type:'string',enum:['slice','collapse']}},required:['operation'],additionalProperties:false},execute:i=>{chooseOperation(i?.operation);return{operation}}});
- reg({name:'set_presentation',description:'Change the viewing angle of the same lower-dimensional result. Geometry and cut stay fixed.',inputSchema:{type:'object',properties:{view:{type:'string',enum:['angled','topdown','horizon']}},required:['view'],additionalProperties:false},execute:i=>{choosePresentation(i?.view);return{view:presentation}}});
  reg({name:'set_shape',description:'Choose a shape in the shadow explorer.',inputSchema:{type:'object',properties:{shape:{type:'string',enum:Object.values(sliceChoices).flat()}},required:['shape'],additionalProperties:false},execute:i=>{chooseShape(i?.shape);return{shape:sourceNames[dimension],dimension}}});
  reg({name:'set_section_position',description:'Move the lower-dimensional cutter through the selected shape.',inputSchema:{type:'object',properties:{position:{type:'number',minimum:-1.2,maximum:1.2}},required:['position'],additionalProperties:false},execute:i=>{if(operation!=='slice')throw new Error('Choose Slice to move the cut.');setCutPosition(i.position);return{dimension,position:cutPosition,section:sliceData().name}}});
  reg({name:'read_projection',description:'Read the linked source and vertex multiplicities in the shadow chain.',inputSchema:{type:'object',properties:{},additionalProperties:false},execute:()=>{const q=shadow.inspect(),p=q.resultChain||q;return{shape:q.S.name,dimension:q.S.dim,operation:operation==='slice'?'slice, then shadows':'whole-object collapse',vertices:p.n,positions:p.groups.length,multiplicities:p.live}}});
@@ -1082,4 +1085,5 @@ if(document.modelContext?.registerTool){const life=new AbortController(),reg=t=>
 }
 // initialization
 readCss();resetOrientation();const shadow=createShadowExplorer();syncUi();draw();
+for(const event of['pointerdown','keydown','focusin','wheel'])document.addEventListener(event,stopAuto,{capture:true,passive:event==='wheel'});document.addEventListener('visibilitychange',()=>{if(document.hidden)stopAuto()});motionPreference.addEventListener?.('change',e=>{reduce=e.matches;if(reduce)stopAuto()});startAuto();
 })();
