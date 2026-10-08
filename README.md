@@ -14,7 +14,7 @@ Open http://localhost:8000 in a modern browser. The complete app is in `dist/`; 
 
 ## Snapshot
 
-This backup preserves version 15, including the refined layer layout and Shadow/Topdown display toggle. The app files are byte-identical to source commit `ce516721565975f55e5ea28726894b16c38e485a`.
+This backup preserves version 19, immediately before the color preset update. The app files are byte-identical to source commit `42aeb618820957929d9c50761ccb2377a5b227a5`.
 
 - `dist/index.html`: interface
 - `dist/style.css`: styles

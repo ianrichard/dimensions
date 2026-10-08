@@ -667,19 +667,23 @@ function intersectSection(model,position,hull3){
   return selectedShapeSection(model.V,model.E,position,{hull3,cells:model.cells});
 }
 // One selected source and one real rotation drive the entire shadow chain.
-let mode='shadows',presentation='shadow',dimension=3,cutPosition=0,queued=false,cutPointer=null,cutGrabOffset=0;
+let mode='shadows',presentation='shadow',operation='collapse',dimension=3,cutPosition=0,queued=false,cutPointer=null,cutGrabOffset=0;
 const sliceChoices={2:['Square','Triangle'],3:['Cube','Tetra','Octa','Icosa','Dodeca'],4:['Tesseract','5-cell','16-cell']};
 const sourceNames={2:'Square',3:'Cube',4:'Tesseract'},orientationIndices={2:0,3:0,4:0},CAMERA_E=.5,CONTEXT_W=.65;
 const pretty=n=>FULL[n]||n;
+const defaultGaps={2:4,3:4,4:4},layerGaps={...defaultGaps};let planeTilt=CAMERA_E,horizon=false;
+
 let rotation=I4(),baseModel=null,freeOrientation=false,selectedCell=0;
 function determinant4(m){let out=0;for(let a=0;a<4;a++)for(let b=0;b<4;b++)for(let c=0;c<4;c++)for(let d=0;d<4;d++){const p=[a,b,c,d];if(new Set(p).size<4)continue;let inversions=0;for(let i=0;i<4;i++)for(let j=i+1;j<4;j++)if(p[i]>p[j])inversions++;out+=(inversions%2?-1:1)*m[a]*m[4+b]*m[8+c]*m[12+d]}return out}
 let css={};
-function readCss(){const s=getComputedStyle(document.documentElement);['bg','panel','ink','muted','line','plane','planeEdge','m2','shadow','glass','solid','source','tick','lineColor'].forEach(k=>css[k]=s.getPropertyValue('--'+k).trim())}
+function readCss(){const s=getComputedStyle(document.documentElement);['bg','panel','ink','muted','line','plane','planeEdge','m2','shadow','glass','solid','source','tick','lineColor','shadowBack'].forEach(k=>css[k]=s.getPropertyValue('--'+k).trim())}
+function orientationFor(model,n){
+ let M=I4();const B=model.basis;for(let i=0;i<n;i++)for(let j=0;j<n;j++)M[i*4+j]=B[n===3?(i===1?2:i===2?1:i):i][j];
+ if(determinant4(M)<0){const row=n===2?0:2;for(let j=0;j<4;j++)M[row*4+j]*=-1;}
+ if(n===4)M=mm4(giv(1,2,.18),mm4(giv(0,2,.32),M));return M;
+}
 function resetOrientation(){
- baseModel=sliceModel(sourceNames[dimension],dimension,orientationIndices[dimension]);rotation=I4();
- const B=baseModel.basis;for(let i=0;i<dimension;i++)for(let j=0;j<dimension;j++)rotation[i*4+j]=B[dimension===3?(i===1?2:i===2?1:i):i][j];
- if(determinant4(rotation)<0){const row=dimension===2?0:2;for(let j=0;j<4;j++)rotation[row*4+j]*=-1;}
- if(dimension===4)rotation=mm4(giv(1,2,.18),mm4(giv(0,2,.32),rotation));
+ baseModel=sliceModel(sourceNames[dimension],dimension,orientationIndices[dimension]);rotation=orientationFor(baseModel,dimension);
  freeOrientation=false;selectedCell=0;
  if(dimension===4){const P=sharedSource().P;let best=-Infinity;baseModel.cells.forEach((cell,i)=>{const w=cell.reduce((v,j)=>v+P[j][3],0)/cell.length;if(w>best){best=w;selectedCell=i}})}
 }
@@ -698,7 +702,8 @@ function selectedModel(n=dimension){
 function sliceData(n=dimension,s=cutPosition){if(![2,3,4].includes(n)||!Number.isFinite(s)||s< -1.2||s>1.2)throw new Error('Choose a shape and a cut position from -1.2 to 1.2.');return intersectSection(selectedModel(n),s)}
 function chooseDimension(n){if(![2,3,4].includes(n))throw new Error('Choose a listed dimension.');if(n!==dimension)chooseShape(sourceNames[n])}
 function chooseMode(next){if(next!=='shadows')return;mode=next;syncUi();draw()}
-function choosePresentation(next){if(!['shadow','topdown'].includes(next))throw new Error('Choose Shadow or Topdown.');presentation=next;syncUi();draw()}
+function chooseOperation(next){if(next==='project')next='collapse';if(!['slice','collapse'].includes(next))throw new Error('Choose Slice or Collapse.');operation=next;cutPointer=null;shadow.clearSelection();syncUi();draw()}
+function choosePresentation(next){if(next==='angled')next='shadow';if(!['shadow','topdown','horizon'].includes(next))throw new Error('Choose Angled, Top down, or Horizon.');presentation=next==='topdown'?'topdown':'shadow';horizon=next==='horizon';syncUi();draw()}
 function chooseShape(name){const n=[2,3,4].find(n=>sliceChoices[n].includes(name));if(!n)throw new Error('Choose a listed shape.');dimension=n;sourceNames[n]=name;orientationIndices[n]=name==='16-cell'?1:0;cutPosition=0;$('cutPosition').value=0;cutPointer=null;resetOrientation();syncUi();if(typeof shadow!=='undefined')shadow.clearSelection();draw()}
 function rotateSlice(){if(!freeOrientation)orientationIndices[dimension]=(orientationIndices[dimension]+1)%baseModel.orientationCount;resetOrientation();syncUi();shadow.clearSelection();draw()}
 function rotateShared(dx,dy){if(dimension===2)rotation=mm4(giv(0,1,(dx-dy)*.01),rotation);else{if(dx)rotation=mm4(giv(0,dimension===4?3:2,-dx*.01),rotation);if(dy)rotation=mm4(giv(1,2,dy*.01),rotation)}freeOrientation=true;shadow.clearSelection();updateRotateLabel();redraw()}
@@ -706,10 +711,23 @@ function setCutPosition(s){const q=sliceData(dimension,s);cutPosition=s;$('cutPo
 const iconPaths={Icosa:'m16 2 13 9-5 17H8L3 11Zm0 0L8 28l21-17H3l21 17Zm-13 9 13 9 13-9M8 28l8-8 8 8',Dodeca:'m16 2 11 6 4 12-9 10H10L1 20 5 8Zm0 6 9 7-3 11H10L7 15Zm0-6v6M5 8l2 7M1 20l9 6m12 4v-4m9-6-6-5m2-7-2 7',Square:'M6 6h20v20H6Z',Triangle:'M16 4 29 27H3Z',Cube:'m16 3 12 7v13l-12 7-12-7V10Zm0 0v13M4 10l12 6 12-6M16 16v14',Tetra:'m16 3 13 22H3Zm0 0v18m-13 4 13-4 13 4',Octa:'m16 2 13 14-13 14L3 16Zm0 0v28M3 16l13-5 13 5-13 5Z',Tesseract:'M3 3h26v26H3ZM10 10h12v12H10ZM3 3l7 7m19-7-7 7m7 19-7-7M3 29l7-7','5-cell':'m16 2 14 10-5 16H7L2 12Zm0 0 9 26L2 12l28 0L7 28Zm-14 10 23 16M16 2 7 28','16-cell':'m16 2 14 14-14 14L2 16Zm0 0v28M2 16h28M16 7l9 9-9 9-9-9Zm0 0v18M7 16h18'};
 function buildShapeIcons(){const holder=$('shapeIcons');if(!holder.children.length){[2,3,4].forEach(n=>sliceChoices[n].forEach(name=>{const b=document.createElement('button');b.type='button';b.className='icon-button';b.dataset.shape=name;b.setAttribute('aria-label',`${pretty(name)}, ${n}D shape`);b.title=`${pretty(name)} · ${n}D`;b.innerHTML=`<svg viewBox="0 0 32 32" aria-hidden="true"><path d="${iconPaths[name]}"/></svg><small aria-hidden="true">${n}D</small>`;b.onclick=()=>chooseShape(name);holder.appendChild(b)}))}for(const b of holder.children){b.setAttribute('aria-pressed',b.dataset.shape===sourceNames[dimension]);b.hidden=false}}
 function updateRotateLabel(){const label=freeOrientation?'Reset view':'Rotate · '+baseModel.orientationName;$('rotateSlice').title=label;$('rotateSlice').setAttribute('aria-label',freeOrientation?'Reset view to '+baseModel.orientationName:'Rotate to the next orientation. Current: '+baseModel.orientationName)}
+function setViewOptions({gap,tilt,perspective}={}){
+ if(gap!==undefined){if(!Number.isFinite(gap)||gap<4||gap>64)throw new Error('Gap must be 4–64 pixels.');layerGaps[dimension]=gap}
+ if(tilt!==undefined){if(!Number.isFinite(tilt)||tilt<10||tilt>90)throw new Error('Tilt must be 10–90 degrees.');planeTilt=tilt*Math.PI/180}
+ if(perspective!==undefined)horizon=!!perspective;syncViewControls();draw();
+}
+function planeView(){return presentation==='topdown'?'topdown':horizon?'horizon':'angled'}
+function cyclePlaneView(){if(dimension===2)return;const current=planeView();if(current==='angled'){presentation='topdown';horizon=false}else if(current==='topdown'){presentation='shadow';horizon=true}else{presentation='shadow';horizon=false}syncUi();draw()}
+function syncViewControls(){
+ $('gapRange').value=layerGaps[dimension];$('gapValue').textContent=layerGaps[dimension]+' px';$('tiltRange').value=planeTilt*180/Math.PI;$('tiltValue').textContent=Math.round(planeTilt*180/Math.PI)+'°';$('tiltRange').disabled=dimension===2||presentation==='topdown';
+ const current=planeView(),name={angled:'Angled',topdown:'Top down',horizon:'Horizon'},next={angled:'topdown',topdown:'horizon',horizon:'angled'},paths={angled:'M3 16 12 8 25 13 16 21Z',topdown:'M5 7h18v14H5Z',horizon:'M8 7h12l6 15H2Z'};
+ const button=$('planeViewButton');button.hidden=dimension===2;button.dataset.view=current;button.setAttribute('aria-label',`2D view: ${name[current]}. Switch to ${name[next[current]]}.`);button.title=`${name[current]} · switch to ${name[next[current]]}`;button.innerHTML=`<svg viewBox="0 0 28 28" aria-hidden="true"><path d="${paths[current]}"/></svg>`;
+}
 function syncUi(){
- $('viewControls').hidden=dimension===2;$('viewShadow').setAttribute('aria-pressed',presentation==='shadow');$('viewTopdown').setAttribute('aria-pressed',presentation==='topdown');const four=dimension===4;$('viewDivider').hidden=!four;$('viewDivider').classList.toggle('in-stack',four);$('shadowStage').classList.toggle('has-cutter',four);
+ syncViewControls();const four=dimension===4,slicing=operation==='slice';$('operationControls').hidden=false;$('sceneToolbar').classList.toggle('has-operation',true);$('operationSlice').setAttribute('aria-pressed',slicing);$('operationCollapse').setAttribute('aria-pressed',operation==='collapse');$('viewDivider').hidden=!slicing;$('viewDivider').classList.toggle('in-stack',true);$('shadowStage').classList.toggle('has-cutter',slicing);
  $('shadowTitle').textContent=pretty(sourceNames[dimension]);buildShapeIcons();updateRotateLabel();
- $('shadowNote').textContent=four?'The 4D shape is shown in projection. Its actual 3D slice casts the shadows below. Taller ticks count vertices sharing one position.':dimension===3?'Shape, shadow, then the shadow’s shadow. Taller ticks count vertices sharing one position.':'Shape, then its line shadow. Taller ticks count vertices sharing one position.';
+ $('shadowNote').textContent=(four?'The 4D source is shown in projection. ':'')+(slicing?'Slice intersects the shape at one position. '+(dimension===4?'The 3D cutting space is infinite; dashed edges mark the actual slice.':'The faint guide is a window in an infinite cutting '+(dimension===2?'line.':'plane.'))+' Ticks count slice vertices.':'Collapse drops a coordinate from the whole shape. '+(dimension>2?'Each lower shadow drops another. ':'')+'Ticks count source vertices.');
+ $('cutPosition').setAttribute('aria-label',`${dimension-1}D slice position`);
  $('shadowSourceHit').hidden=!four;$('shadowHit').hidden=false;
 }
 
@@ -745,6 +763,7 @@ function drawSliceSource(f,q){
  else if(q.kind==='point'){c.beginPath();c.arc(...project(lifted[0]),1.5,0,Math.PI*2);c.fillStyle=css.solid;c.fill()}
  // Source edges remain legible through the ghost section; no separate cutter box.
  drawSource(f,q.source.baseVerts,q.source.edges);
+ if(lifted.length>1){c.setLineDash([3,4]);graph(c,lifted,q.edges,project,css.m2,.45,.85);c.setLineDash([])}
 }
 function drawSliceResult(f,q){
  const project=v=>projectResult(v,f),c=f.c;
@@ -753,6 +772,80 @@ function drawSliceResult(f,q){
   for(const [i,j]of q.edges){const depth=p=>p[1]*Math.sin(CAMERA_E)+p[2]*Math.cos(CAMERA_E),a=edgeAppearance((depth(q.verts[i])+depth(q.verts[j]))/2);graph(c,q.verts,[[i,j]],project,css.solid,a.alpha*.72,a.width)}
  }else fillShape(c,q.verts,q.edges,q.facets,project,.18);
 }
+// A whole-object projection uses all source vertices, never a selected cut.
+function projectionHull(points) {
+  const P=[],source=[];points.forEach((p,i)=>{const q=p.slice(0,3);if(!P.some(v=>v.every((x,k)=>x===q[k]))){P.push(q);source.push(i);}});const n=P.length;
+  const sub=(a,b)=>a.map((v,k)=>v-b[k]),dot=(a,b)=>a.reduce((s,v,k)=>s+v*b[k],0);
+  const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+  const edgeKey=(a,b)=>a<b?a+','+b:b+','+a;
+  const buf=new ArrayBuffer(8),view=new DataView(buf);
+  const parts=P.map(p=>p.map(v=>{
+    if(!Number.isFinite(v))throw new Error('Non-finite projection');
+    if(!v)return [0n,0];view.setFloat64(0,v);
+    const b=view.getBigUint64(0),e=Number((b>>52n)&2047n),m=(b&((1n<<52n)-1n))+(e?1n<<52n:0n);
+    return [(b>>63n?-1n:1n)*m,e?e-1075:-1074];
+  }));
+  const exponent=Math.min(...parts.flat().filter(([m])=>m).map(([,e])=>e));
+  const Q=parts.map(p=>p.map(([m,e])=>m?m<<BigInt(e-exponent):0n));
+  const facets=[],seen=new Set();
+  for(let a=0;a<n-2;a++)for(let b=a+1;b<n-1;b++)for(let c=b+1;c<n;c++){
+    const raw=cross(sub(P[b],P[a]),sub(P[c],P[a])),length=Math.hypot(...raw);
+    let big=null;const exactNormal=()=>big||(big=cross(sub(Q[b],Q[a]),sub(Q[c],Q[a])));
+    if(!exactNormal().some(v=>v))continue;
+    let side=0,valid=true;const on=[];
+    for(let i=0;i<n;i++){
+      const d=dot(raw,sub(P[i],P[a]));let s;
+      if(Math.abs(d)>Math.max(length*1e-13,1e-14))s=Math.sign(d);
+      else{const v=sub(Q[i],Q[a]),q=exactNormal(),d=q[0]*v[0]+q[1]*v[1]+q[2]*v[2];s=d>0n?1:d<0n?-1:0;}
+      if(!s)on.push(i);else if(side&&s!==side){valid=false;break;}else side=s;
+    }
+    if(!valid||!side)continue;
+    const faceKey=on.join(',');if(seen.has(faceKey))continue;seen.add(faceKey);
+    const q=exactNormal().map(Number),l=Math.hypot(...q),normal=q.map(v=>-side*v/l);
+    const drop=[0,1,2].reduce((m,k)=>Math.abs(normal[k])>Math.abs(normal[m])?k:m,0),axes=[0,1,2].filter(k=>k!==drop);
+    const sorted=on.slice().sort((i,j)=>P[i][axes[0]]-P[j][axes[0]]||P[i][axes[1]]-P[j][axes[1]]);
+    const turn=(i,j,k)=>(Q[j][axes[0]]-Q[i][axes[0]])*(Q[k][axes[1]]-Q[i][axes[1]])-(Q[j][axes[1]]-Q[i][axes[1]])*(Q[k][axes[0]]-Q[i][axes[0]]);
+    const lo=[],hi=[];
+    for(const i of sorted){while(lo.length>1&&turn(lo.at(-2),lo.at(-1),i)<=0n)lo.pop();lo.push(i);}
+    for(const i of sorted.slice().reverse()){while(hi.length>1&&turn(hi.at(-2),hi.at(-1),i)<=0n)hi.pop();hi.push(i);}
+    const ids=lo.slice(0,-1).concat(hi.slice(0,-1));
+    if(dot(cross(sub(P[ids[1]],P[ids[0]]),sub(P[ids[2]],P[ids[0]])),normal)<0)ids.reverse();
+    facets.push({ids,normal,offset:dot(normal,P[ids[0]])});
+  }
+  // Connect adjacent facets only when every vertex lies on the same plane.
+  const parents=facets.map((_,i)=>i),find=i=>parents[i]===i?i:(parents[i]=find(parents[i])),adj=new Map();
+  facets.forEach((f,i)=>f.ids.forEach((a,k)=>{const key=edgeKey(a,f.ids[(k+1)%f.ids.length]);if(!adj.has(key))adj.set(key,[]);adj.get(key).push(i);}));
+  for(const pair of adj.values())if(pair.length===2){const [i,j]=pair,a=facets[i],b=facets[j];
+    if(dot(a.normal,b.normal)>1-1e-12&&b.ids.every(k=>Math.abs(dot(a.normal,P[k])-a.offset)<1e-9)&&a.ids.every(k=>Math.abs(dot(b.normal,P[k])-b.offset)<1e-9))parents[find(j)]=find(i);
+  }
+  const groups=new Map();facets.forEach((f,i)=>{const k=find(i);if(!groups.has(k))groups.set(k,[]);groups.get(k).push(f);});
+  const merged=[];
+  for(const group of groups.values()){
+    if(group.length===1){merged.push(group[0]);continue;}
+    const boundary=new Map();for(const f of group)f.ids.forEach((a,k)=>{const b=f.ids[(k+1)%f.ids.length],key=edgeKey(a,b);if(boundary.has(key))boundary.delete(key);else boundary.set(key,[a,b]);});
+    const next=new Map([...boundary.values()]);const first=next.keys().next().value,ids=[];let i=first;
+    while(i!==undefined&&!ids.includes(i)){ids.push(i);i=next.get(i);}
+    if(i!==first||ids.length!==boundary.size){merged.push(...group);continue;}
+    const largest=group.slice().sort((a,b)=>Math.hypot(...cross(sub(P[b.ids[1]],P[b.ids[0]]),sub(P[b.ids[2]],P[b.ids[0]])))-Math.hypot(...cross(sub(P[a.ids[1]],P[a.ids[0]]),sub(P[a.ids[2]],P[a.ids[0]]))))[0];
+    merged.push({...largest,ids});
+  }
+  const vertices=new Set(),edges=new Map();for(const f of merged)f.ids.forEach((a,k)=>{const b=f.ids[(k+1)%f.ids.length];vertices.add(a);edges.set(edgeKey(a,b),[a,b]);});
+  if(merged.length<4)throw new Error('The 3D projection has no volume');
+  return {vertices:[...vertices].map(i=>source[i]),edges:[...edges.values()].map(e=>e.map(i=>source[i])),facets:merged.map(f=>({...f,ids:f.ids.map(i=>source[i])}))};
+}
+
+let wholeProjectionCache=null;
+function wholeProjection(){
+ const {S,P}=sharedSource(),key=JSON.stringify(P);if(wholeProjectionCache?.key===key)return wholeProjectionCache.value;
+ const verts=P.map(p=>p.slice(0,3)),hull=projectionHull(verts),value={kind:'polyhedron',rank:3,name:'3D shadow',verts,edges:hull.edges,facets:hull.facets,hull,source:{baseVerts:P,edges:S.E}};
+ wholeProjectionCache={key,value};return value;
+}
+function drawProjectedResult(f,q){
+ const c=f.c,ce=Math.cos(CAMERA_E),se=Math.sin(CAMERA_E),depth=p=>p[1]*se+p[2]*ce,view=[0,se,ce],light=[-.45,.65,.61],dot=(a,b)=>a.reduce((s,x,i)=>s+x*b[i],0),edges=new Map();
+ const faces=q.facets.filter(face=>dot(face.normal,view)>1e-12).sort((a,b)=>a.ids.reduce((v,i)=>v+depth(q.verts[i]),0)/a.ids.length-b.ids.reduce((v,i)=>v+depth(q.verts[i]),0)/b.ids.length);
+ for(const face of faces){path(c,face.ids.map(i=>projectResult(q.verts[i],f)),true);c.fillStyle=css.bg;c.fill();c.fillStyle=css.solid;c.globalAlpha=.12+.1*Math.max(0,dot(face.normal,light));c.fill();c.globalAlpha=1;face.ids.forEach((i,k)=>{const j=face.ids[(k+1)%face.ids.length],key=i<j?i+','+j:j+','+i;edges.set(key,[i,j])})}
+ graph(c,q.verts,[...edges.values()],v=>projectResult(v,f),css.solid,.58,1.05);
+}
 const SAMPLE_POSITIONS=[-.5,-.25,0,.25,.5];
 const perspective4=p=>p.slice(0,3).map(x=>Math.sqrt(5.25)*x/(2.5-p[3]));
 function edgeAppearance(depth){const t=(Math.max(-1,Math.min(1,depth))+1)/2;return{width:.85+.55*t,alpha:.2+.55*t}}
@@ -760,10 +853,10 @@ function bindRotation(el){let drag=null;el.addEventListener('pointerdown',e=>{if
 // Strict numerical validation is used only after checking curated provenance.
 // These labels describe ratios to the smallest displayed gap, not distances.
 function spacingCue({gaps}, {freeOrientation, dimension, cutPosition = 0,
-  samplePositions = SAMPLE_POSITIONS, criticalLevels = []}) {
+  samplePositions = SAMPLE_POSITIONS, criticalLevels = [], operation = 'slice'}) {
   const tolerance = 1e-9;
   if (freeOrientation !== false || ![2, 3, 4].includes(dimension)) return null;
-  if (dimension === 4 && ![...samplePositions, ...criticalLevels].some(
+  if (operation === 'slice' && ![...samplePositions, ...criticalLevels].some(
     position => Number.isFinite(position) && Math.abs(position - cutPosition) <= tolerance)) return null;
   if (gaps.length < 2 || gaps.some(gap => !Number.isFinite(gap) || gap <= 0)) return null;
   const unit = Math.min(...gaps);
@@ -777,25 +870,40 @@ function spacingCue({gaps}, {freeOrientation, dimension, cutPosition = 0,
 }
 
 
+const visualBoundsCache=new Map();
+function shapeVisualBounds(name,n,k){
+ const key=n+':'+name;let data=visualBoundsCache.get(key);
+ if(!data){
+  if(n===4){const model=sliceModel(name,4),sets=[];for(let i=0;i<model.orientationCount;i++){const m=sliceModel(name,4,i),M=orientationFor(m,4);sets.push(m.rawV.map(p=>mul4(M,p)))}data={sets};}
+  else data={vertices:sliceModel(name,n).rawV};visualBoundsCache.set(key,data);
+ }
+ const ce=Math.cos(CAMERA_E),se=Math.sin(CAMERA_E),h=CONTEXT_W*ce;
+ if(n===4){let source=0,body=0,first=0,joint=0;for(const P of data.sets)for(const p of P){const r=Math.hypot(p[1],p[2]);source=Math.max(source,r+h*Math.hypot(p[0],p[3]));body=Math.max(body,r);for(const q of P){first=Math.max(first,Math.hypot(p[1]-q[1],p[2]-q[2])+h*Math.hypot(p[0],p[3]));joint=Math.max(joint,Math.hypot(-ce*p[1]+se*p[2]-k*q[2],ce*p[2]+se*p[1]-k*q[1]))}}
+  return{source,body,first,joint};
+ }
+ let joint=1+k;if(n===3){joint=0;for(const p of data.vertices)for(const q of data.vertices){const d=Math.max(-1,Math.min(1,p.reduce((v,x,i)=>v+x*q[i],0)));joint=Math.max(joint,Math.sqrt(Math.max(0,1+k*k-2*d*k*se+2*k*ce*Math.sqrt(Math.max(0,1-d*d)))))} }
+ return{source:1,body:1,first:2,joint};
+}
 function createShadowExplorer(){
  const cv=$('shadowCanvas'),ctx=cv.getContext('2d'),hit=$('shadowHit');
  let S=null,sel=-1,W=0,H=0,R=100,lay={},compactFrames=null;
- const CE=Math.cos(CAMERA_E),SE=Math.sin(CAMERA_E),GAP=32,SOURCE4_BOUND=Math.hypot(1,CONTEXT_W*CE),col=()=>css.m2;
+ const CE=Math.cos(CAMERA_E),SE=Math.sin(CAMERA_E),col=()=>css.m2;
  const sourceHit=$('shadowSourceHit');
  // Layout depends on viewport, dimension and explicit presentation only.
  // All shapes have unit circumradius; every section remains inside that ball.
  function layout(){
-  W=cv.clientWidth||800;const LW=W>=560?72:64,right=44,avail=W-LW-right;
-  R=Math.max(36,Math.min(136,avail/2-8));const o={LW,ox:LW+avail/2,planeScale:presentation==='topdown'?1:SE};
-  let next=8;
-  if(S.dim===4){o.sourceY=next+SOURCE4_BOUND*R;o.sourceTop=next;next+=2*SOURCE4_BOUND*R+GAP;}
-  o.top3=next;o.oy3=next+R;
-  o.planeY=o.oy3+R+GAP+R*o.planeScale;o.planeBack=o.planeY-R*o.planeScale;o.planeFront=o.planeY+R*o.planeScale;
-  o.strip=S.dim===2?o.oy3+R+GAP:o.planeFront+GAP;H=o.strip+112;return o;
+  W=cv.clientWidth||800;const LW=W>=560?72:64,right=44,avail=W-LW-right,angle=presentation==='topdown'?Math.PI/2:planeTilt,k=Math.sin(angle),perspective=horizon&&presentation!=='topdown'&&S.dim>2,depth=perspective?.25*Math.cos(angle):0,b=shapeVisualBounds(S.name,S.dim,k),gap=layerGaps[S.dim];
+  R=Math.max(32,Math.min(136,(avail/2-8)*Math.sqrt(1-depth*depth)));const o={LW,ox:LW+avail/2,planeScale:k,planeDepth:depth,planeRadius:b.body,bodyBound:b.body,sourceBound:b.source,gap};
+  if(S.dim===4){o.sourceTop=8;o.sourceY=8+b.source*R;o.oy3=o.sourceY+b.first*R+gap;o.top3=o.oy3-b.body*R;}
+  else{o.top3=16+(S.dim===2?.2*R:0);o.oy3=o.top3+R;}
+  const back=k*b.body/(1+depth*b.body),front=k*b.body/(1-depth*b.body);
+  o.planeY=o.oy3+(perspective?b.body+back:b.joint)*R+gap;o.planeBack=o.planeY-back*R;o.planeFront=o.planeY+front*R;
+  o.strip=S.dim===2?o.oy3+R+gap:o.planeFront+gap;H=o.strip+112;return o;
  }
- function resize(){lay=layout();const d=Math.min(2,devicePixelRatio||1);cv.style.height=H+'px';if(cv.width!==Math.round(W*d)||cv.height!==Math.round(H*d)){cv.width=Math.round(W*d);cv.height=Math.round(H*d)}ctx.setTransform(d,0,0,d,0,0);const side=2*R;hit.style.width=hit.style.height=side+'px';hit.style.left=(lay.ox-side/2)+'px';hit.style.top=(lay.oy3-side/2)+'px';if(S.dim===4){const height=2*SOURCE4_BOUND*R;sourceHit.style.width=side+'px';sourceHit.style.height=height+'px';sourceHit.style.left=(lay.ox-side/2)+'px';sourceHit.style.top=lay.sourceTop+'px'}}
- const PX=x=>lay.ox+R*x,PY=(y,z)=>lay.oy3-R*(y*CE-z*SE),SHY=z=>lay.planeY+R*lay.planeScale*z,DEP=(y,z)=>y*SE+z*CE;
+ function resize(){lay=layout();if(S.dim>2){$('planeViewButton').style.top=(lay.planeY-22)+'px';$('planeViewButton').hidden=false;}const d=Math.min(2,devicePixelRatio||1);cv.style.height=H+'px';if(cv.width!==Math.round(W*d)||cv.height!==Math.round(H*d)){cv.width=Math.round(W*d);cv.height=Math.round(H*d)}ctx.setTransform(d,0,0,d,0,0);if(S.dim!==4)compactFrames={source:{c:ctx,w:W,h:H,R,ox:lay.ox,oy:lay.oy3},result:{c:ctx,w:W,h:H,R,ox:lay.ox,oy:S.dim===3?lay.planeY:lay.strip},planeY:lay.planeY,H};const side=2*R;hit.style.width=hit.style.height=side+'px';hit.style.left=(lay.ox-side/2)+'px';hit.style.top=(lay.oy3-side/2)+'px';if(S.dim===4){const height=2*lay.sourceBound*R;sourceHit.style.width=side+'px';sourceHit.style.height=height+'px';sourceHit.style.left=(lay.ox-side/2)+'px';sourceHit.style.top=lay.sourceTop+'px'}}
+ const PX=x=>lay.ox+R*x,PY=(y,z)=>lay.oy3-R*(y*CE-z*SE),planePoint=(x,z)=>{const d=1-lay.planeDepth*z;return[lay.ox+R*x/d,lay.planeY+R*lay.planeScale*z/d]},SHY=z=>planePoint(0,z)[1],DEP=(y,z)=>y*SE+z*CE;
 function lblock(center,title,lines){
+  if(title==='2D'&&dimension>2)$('planeViewButton').style.top=(center-22)+'px';
   const total=13+15*lines.length;let y=center-total/2+11;
   ctx.textAlign='left';ctx.fillStyle=css.ink;ctx.font='600 13px ui-monospace, monospace';ctx.fillText(title,16,y);y+=15;
   ctx.font='400 11px ui-monospace, monospace';ctx.fillStyle=css.muted;
@@ -807,7 +915,7 @@ function compute(){
   const groups=projectionGroups(P,[0]);
   const gOf=new Array(n);let spread=0;
   groups.forEach((g,gi)=>{let s=0,mn=1e9,mx=-1e9;for(const i of g.idx){const x=P[i][0];s+=x;if(x<mn)mn=x;if(x>mx)mx=x;gOf[i]=gi}g.x=s/g.idx.length;spread=Math.max(spread,mx-mn)});
-  if(S.dim!==4&&sel>=groups.length)sel=-1;
+  if(S.dim!==4&&operation!=='slice'&&sel>=groups.length)sel=-1;
   const exact=spread<=EPS;let even=false;
   if(exact&&groups.length>=2){const st=(groups[groups.length-1].x-groups[0].x)/(groups.length-1);even=groups.every((g,i)=>!i||Math.abs(g.x-groups[i-1].x-st)<Math.max(EPS,st*1e-4))}
   const gaps=groups.slice(1).map((g,i)=>g.x-groups[i].x);
@@ -816,51 +924,90 @@ function compute(){
 }
  function drawLine(C){
   const {groups}=C;if(!groups.length)return;
-  const cue=spacingCue(C,{freeOrientation,dimension,cutPosition,criticalLevels:dimension===4?selectedModel().criticalLevels:[]}),sY=lay.strip,unit=4,maxHeight=Math.max(...groups.map(g=>unit*g.idx.length));
+  const cue=spacingCue(C,{freeOrientation,dimension,operation,cutPosition,criticalLevels:operation==='slice'?selectedModel().criticalLevels:[]}),sY=lay.strip,unit=4,maxHeight=Math.max(...groups.map(g=>unit*g.idx.length));
   ctx.strokeStyle=css.lineColor;ctx.lineWidth=3;ctx.lineCap='butt';ctx.globalAlpha=1;ctx.beginPath();ctx.moveTo(PX(groups[0].x),sY);ctx.lineTo(PX(groups.at(-1).x),sY);ctx.stroke();
   // A point-degenerate projection is a short vertical mark, not a fictitious interval.
   if(groups.length===1){ctx.beginPath();ctx.moveTo(PX(groups[0].x),sY-1.5);ctx.lineTo(PX(groups[0].x),sY+1.5);ctx.stroke()}
   groups.forEach((g,i)=>{const x=PX(g.x),height=unit*g.idx.length,on=i===sel;ctx.strokeStyle=css.tick;ctx.globalAlpha=sel>=0?(on?.8:.16):.3;ctx.lineWidth=on?2:1.25;ctx.beginPath();ctx.moveTo(x,sY+6);ctx.lineTo(x,sY+6+height);ctx.stroke()});ctx.globalAlpha=1;
   if(cue){const y=sY+maxHeight+23;ctx.strokeStyle=ctx.fillStyle=css.m2;ctx.globalAlpha=.7;ctx.lineWidth=1;ctx.font='500 11px ui-monospace, monospace';ctx.textAlign='center';for(let i=1;i<groups.length;i++){const x0=PX(groups[i-1].x)+3,x1=PX(groups[i].x)-3;if(x1-x0<23)continue;ctx.beginPath();ctx.moveTo(x0,y-3);ctx.lineTo(x0,y);ctx.lineTo(x1,y);ctx.lineTo(x1,y-3);ctx.stroke();ctx.fillText(cue.labels[i-1],(x0+x1)/2,y+14)}ctx.globalAlpha=1;ctx.fillStyle=css.muted;ctx.textAlign='left';ctx.font='400 10px ui-monospace, monospace';ctx.fillText('ratios',16,y+14)}
-  if(sel>=0&&groups[sel]){const count=groups[sel].idx.length;ctx.fillStyle=css.muted;ctx.textAlign='center';ctx.font='400 11px ui-monospace, monospace';ctx.fillText(`${count} ${count===1?'vertex':'vertices'}`,PX(groups[sel].x),sY+maxHeight+(cue?59:24))}
+  if(sel>=0&&groups[sel]){const count=groups[sel].idx.length;ctx.fillStyle=css.muted;ctx.textAlign='center';ctx.font='400 11px ui-monospace, monospace';ctx.fillText(`${count} ${operation==='slice'?'slice ':dimension===4?'source ':''}${count===1?'vertex':'vertices'}`,PX(groups[sel].x),sY+maxHeight+(cue?59:24))}
   return{cue,heights:groups.map(g=>unit*g.idx.length)};
  }
-function paintSilhouette(points){if(points.length<3)return;path(ctx,points.map(p=>[PX(p[0]),SHY(p[2])]),true);ctx.globalAlpha=1;ctx.fillStyle=css.bg;ctx.fill();ctx.fillStyle=css.shadow;ctx.fill()}
+function planeFill(){const back=planePoint(0,-lay.planeRadius),front=planePoint(0,lay.planeRadius),gradient=ctx.createLinearGradient(...back,...front);gradient.addColorStop(0,css.shadowBack);gradient.addColorStop(1,css.shadow);return gradient}
+function paintSilhouette(points){if(points.length<3)return;path(ctx,points.map(p=>planePoint(p[0],p[2])),true);ctx.globalAlpha=1;ctx.fillStyle=css.bg;ctx.fill();ctx.fillStyle=planeFill();ctx.fill()}
+function drawThreeBody(C){const {P}=C;
+  const dep=P.map(p=>DEP(p[1],p[2]));ctx.fillStyle=css.glass;
+  if(S.F){S.F.map(f=>[f,f.reduce((s,i)=>s+dep[i],0)/f.length]).sort((a,b)=>a[1]-b[1]).forEach(([f])=>{ctx.beginPath();f.forEach((i,k)=>{const X=PX(P[i][0]),Y=PY(P[i][1],P[i][2]);k?ctx.lineTo(X,Y):ctx.moveTo(X,Y)});ctx.closePath();ctx.fill()})}
+  else{const sp=P.map(p=>[PX(p[0]),PY(p[1],p[2])]).sort((a,b)=>a[0]-b[0]||a[1]-b[1]),cr=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]),lo=[],up=[];
+    for(const p of sp){while(lo.length>1&&cr(lo[lo.length-2],lo[lo.length-1],p)<=0)lo.pop();lo.push(p)}
+    for(let i=sp.length-1;i>=0;i--){const p=sp[i];while(up.length>1&&cr(up[up.length-2],up[up.length-1],p)<=0)up.pop();up.push(p)}
+    const hh=lo.slice(0,-1).concat(up.slice(0,-1));ctx.beginPath();hh.forEach((p,k)=>k?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.closePath();ctx.fill()}
+  const cell=new Set(S.dim===4?S.cells[selectedCell]:[]);
+  for(const [i,j]of S.E.slice().sort((a,b)=>Number(cell.has(a[0])&&cell.has(a[1]))-Number(cell.has(b[0])&&cell.has(b[1])))){const appearance=edgeAppearance((dep[i]+dep[j])/2),highlight=cell.has(i)&&cell.has(j);ctx.strokeStyle=highlight?css.m2:css.solid;ctx.lineWidth=appearance.width;ctx.globalAlpha=appearance.alpha*(sel>=0?.6:1);ctx.beginPath();ctx.moveTo(PX(P[i][0]),PY(P[i][1],P[i][2]));ctx.lineTo(PX(P[j][0]),PY(P[j][1],P[j][2]));ctx.stroke()}ctx.globalAlpha=1;
+ }
+function drawLowerSlice(sourceData){
+ const C=sectionProjection(),q=C.section,{P,groups}=C,f=compactFrames.source;
+ ctx.clearRect(0,0,W,H);$('planeViewButton').hidden=dimension===2||!P.length;if(sel>=groups.length)sel=-1;
+ // A bounded drawing window in the infinite cutter. It never clips the geometry.
+ ctx.save();ctx.beginPath();ctx.rect(lay.LW,lay.top3-4,W-lay.LW-44,2*R+8);ctx.clip();
+ const lift=cutterFrame(cutPosition),project=p=>lift.project(p,f);
+ ctx.setLineDash([3,5]);ctx.strokeStyle=css.muted;ctx.globalAlpha=.26;ctx.lineWidth=.8;
+ if(dimension===2){const a=project([-1.12]),b=project([1.12]);path(ctx,[a,b]);ctx.stroke()}
+ else{const window=[[-1.1,-1.1],[1.1,-1.1],[1.1,1.1],[-1.1,1.1]];path(ctx,window.map(project),true);ctx.fillStyle=css.solid;ctx.globalAlpha=.025;ctx.fill();ctx.globalAlpha=.24;ctx.stroke()}
+ ctx.restore();
+ if(dimension===3)drawThreeBody(sourceData);else{const xy=p=>[PX(p[0]),lay.oy3-R*p[1]];path(ctx,hull2(sourceData.P.map(xy)),true);ctx.fillStyle=css.shadow;ctx.fill();graph(ctx,sourceData.P,S.E,xy,css.solid,.16,1)}
+ if(q.verts.length){
+  const sourcePoints=q.verts.map(project);ctx.fillStyle=css.solid;ctx.globalAlpha=.1;if(q.verts.length>2){path(ctx,sourcePoints,true);ctx.fill()}ctx.globalAlpha=1;
+  ctx.setLineDash([3,4]);graph(ctx,q.verts,q.edges,project,dimension===2?css.lineColor:css.m2,dimension===2?1:.7,dimension===2?1.8:1.1);ctx.setLineDash([]);
+  if(q.verts.length===1){ctx.beginPath();ctx.arc(...sourcePoints[0],2,0,Math.PI*2);ctx.fillStyle=css.m2;ctx.fill()}
+  const target=p=>dimension===3?planePoint(p[0],p[1]):[PX(p[0]),lay.strip];
+  ctx.strokeStyle=css.solid;ctx.globalAlpha=.22;ctx.lineWidth=.85;ctx.setLineDash([3,4]);q.verts.forEach(p=>{ctx.beginPath();ctx.moveTo(...project(p));ctx.lineTo(...target(p));ctx.stroke()});
+  if(dimension===3){const unique=hull2(q.verts),zFront=x=>{let z=-Infinity;for(let i=0;i<unique.length;i++){const a=unique[i],b=unique[(i+1)%unique.length];if(x>=Math.min(a[0],b[0])-EPS&&x<=Math.max(a[0],b[0])+EPS){const t=Math.abs(b[0]-a[0])<EPS?0:(x-a[0])/(b[0]-a[0]);z=Math.max(z,a[1]+t*(b[1]-a[1]),Math.abs(b[0]-a[0])<EPS?b[1]:-Infinity)}}return Number.isFinite(z)?z:q.verts[0][1]};
+   groups.forEach(g=>{ctx.beginPath();ctx.moveTo(...planePoint(g.x,zFront(g.x)));ctx.lineTo(PX(g.x),lay.strip);ctx.stroke()});ctx.setLineDash([]);ctx.globalAlpha=1;
+   if(q.verts.length>=3){path(ctx,q.verts.map(target),true);ctx.fillStyle=css.bg;ctx.fill();ctx.fillStyle=planeFill();ctx.fill()}else if(q.verts.length===2)graph(ctx,q.verts,[[0,1]],target,css.shadow,1,3);else{ctx.beginPath();ctx.arc(...target(q.verts[0]),2,0,Math.PI*2);ctx.fillStyle=css.shadow;ctx.fill()}
+   lblock(lay.planeY,'2D',[]);
+  }
+  ctx.setLineDash([]);ctx.globalAlpha=1;drawLine(C);lblock(lay.strip,'1D',dimension===2?['slice']:[]);
+ }
+ lblock(lay.oy3,dimension+'D',[]);$('viewDivider').style.height=(lay.oy3+R)+'px';$('viewDivider').style.top='0px';
+ cv.setAttribute('aria-label',`${pretty(S.name)}, ${dimension}D source and its exact ${q.name||'empty'} ${dimension-1}D slice${dimension===3?', followed by its line shadow':''}. The cutter extends beyond its display window. Tick counts: ${C.live.join(', ')}.`);
+ $('cutPosition').setAttribute('aria-valuetext',`${cutPosition.toFixed(2)} along the cut direction; ${q.name||'no intersection'}.`);syncCutThumb();return C;
+}
 function drawFlat(C){const {P,groups,gOf}=C,xy=p=>[PX(p[0]),lay.oy3-R*p[1]];
  ctx.setLineDash([2,4]);ctx.strokeStyle=css.muted;ctx.lineWidth=.8;groups.forEach((g,gi)=>{const low=Math.min(...g.idx.map(i=>P[i][1]));ctx.globalAlpha=sel>=0?(sel===gi?.6:.07):.2;ctx.beginPath();ctx.moveTo(PX(g.x),lay.oy3-R*low);ctx.lineTo(PX(g.x),lay.strip);ctx.stroke()});ctx.setLineDash([]);ctx.globalAlpha=1;
  path(ctx,hull2(P.map(xy)),true);ctx.fillStyle=css.bg;ctx.fill();ctx.fillStyle=css.shadow;ctx.fill();graph(ctx,P,S.E,xy,css.solid,.16,1);drawLine(C);lblock(lay.oy3,'2D',[]);lblock(lay.strip,'1D',[]);ctx.fillStyle=css.muted;ctx.textAlign='left';ctx.font='400 11px ui-monospace, monospace';
 }
 function sectionProjection(){
- const section=sliceData(),P=section.verts.map(p=>[...p,0]),groups=projectionGroups(P,[0]),gOf=[];groups.forEach((g,gi)=>{g.x=g.idx.reduce((v,i)=>v+P[i][0],0)/g.idx.length;g.idx.forEach(i=>gOf[i]=gi)});
+ const section=operation==='slice'?sliceData():wholeProjection(),P=section.verts.map(p=>dimension===4?[...p,0]:dimension===3?[p[0],0,p[1],0]:[p[0],0,0,0]),groups=projectionGroups(P,[0]),gOf=[];groups.forEach((g,gi)=>{g.x=g.idx.reduce((v,i)=>v+P[i][0],0)/g.idx.length;g.idx.forEach(i=>gOf[i]=gi)});
  const gaps=groups.slice(1).map((g,i)=>g.x-groups[i].x),even=gaps.length<2||gaps.every(g=>Math.abs(g-gaps[0])<EPS);return{section,P,n:P.length,groups,gOf,gaps,even,exact:true,live:groups.map(g=>g.idx.length)};
 }
 function drawSectionShadows(){
- const C=sectionProjection(),{P,groups,section:q}=C;resize();ctx.clearRect(0,0,W,H);
- const source={c:ctx,w:W,h:H,R,ox:lay.ox,oy:lay.sourceY},result={c:ctx,w:W,h:H,R,ox:lay.ox,oy:lay.oy3};compactFrames={source,result,planeY:lay.planeY,H,bound4:SOURCE4_BOUND,planeScale:lay.planeScale,gap:GAP};
- const divider=$('viewDivider');divider.style.height=(lay.sourceY+SOURCE4_BOUND*R)+'px';divider.style.top='0px';
+ const C=sectionProjection(),{P,groups,section:q}=C;resize();$('planeViewButton').hidden=!P.length;ctx.clearRect(0,0,W,H);
+ const source={c:ctx,w:W,h:H,R,ox:lay.ox,oy:lay.sourceY},result={c:ctx,w:W,h:H,R,ox:lay.ox,oy:lay.oy3};compactFrames={source,result,planeY:lay.planeY,H,bound4:lay.sourceBound,planeScale:lay.planeScale,planeDepth:lay.planeDepth,gap:lay.gap};
+ const divider=$('viewDivider');divider.style.height=(lay.sourceY+lay.sourceBound*R)+'px';divider.style.top='0px';
  if(sel>=groups.length)sel=-1;
- // Correspondence is the same section vertex in both frames, never a second slice.
+ // Correspondence links an actual section vertex or the same original source vertex.
  ctx.strokeStyle=css.solid;ctx.lineWidth=.85;ctx.setLineDash([3,4]);ctx.globalAlpha=.23;
- if(P.length){const xs=P.map(p=>p[0]),lo=Math.min(...xs),hi=Math.max(...xs);q.verts.forEach(p=>{if(Math.abs(p[0]-lo)>EPS&&Math.abs(p[0]-hi)>EPS)return;const a=cutterFrame(cutPosition).project(p,source),b=projectResult(p,result);ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke()})}ctx.setLineDash([]);ctx.globalAlpha=1;
- drawSliceSource(source,q);
+ if(P.length){const xs=P.map(p=>p[0]),lo=Math.min(...xs),hi=Math.max(...xs);q.verts.forEach((p,i)=>{if(Math.abs(p[0]-lo)>EPS&&Math.abs(p[0]-hi)>EPS)return;const a=operation==='slice'?cutterFrame(cutPosition).project(p,source):projectContext(q.source.baseVerts[i],source),b=projectResult(p,result);ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke()})}ctx.setLineDash([]);ctx.globalAlpha=1;
+ if(operation==='slice')drawSliceSource(source,q);else drawSource(source,q.source.baseVerts,q.source.edges);
  if(P.length){
-  const unique=[];for(const p of P){const a=[p[0],p[2]];if(!unique.some(b=>Math.hypot(a[0]-b[0],a[1]-b[1])<EPS))unique.push(a)}const hull=unique.length===1?unique:hull2(unique),project=p=>[PX(p[0]),SHY(p[1])];
+  const unique=[];for(const p of P){const a=[p[0],p[2]];if(!unique.some(b=>Math.hypot(a[0]-b[0],a[1]-b[1])<EPS))unique.push(a)}const hull=unique.length===1?unique:hull2(unique),project=p=>planePoint(p[0],p[1]);
   ctx.setLineDash([3,4]);ctx.strokeStyle=css.solid;ctx.globalAlpha=.19;ctx.lineWidth=.85;
-  for(const p of P){const a=projectResult(p,result);ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(PX(p[0]),SHY(p[2]));ctx.stroke()}
+  for(const p of P){const a=projectResult(p,result);ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...planePoint(p[0],p[2]));ctx.stroke()}
   ctx.globalAlpha=.3;
-  for(const g of groups){let front=-Infinity;for(let i=0;i<hull.length;i++){const a=hull[i],b=hull[(i+1)%hull.length];if(g.x>=Math.min(a[0],b[0])-EPS&&g.x<=Math.max(a[0],b[0])+EPS){const t=Math.abs(b[0]-a[0])<EPS?0:(g.x-a[0])/(b[0]-a[0]);front=Math.max(front,a[1]+t*(b[1]-a[1]),Math.abs(b[0]-a[0])<EPS?b[1]:-Infinity)}}if(!Number.isFinite(front))front=0;ctx.beginPath();ctx.moveTo(PX(g.x),SHY(front));ctx.lineTo(PX(g.x),lay.strip);ctx.stroke()}
+  for(const g of groups){let front=-Infinity;for(let i=0;i<hull.length;i++){const a=hull[i],b=hull[(i+1)%hull.length];if(g.x>=Math.min(a[0],b[0])-EPS&&g.x<=Math.max(a[0],b[0])+EPS){const t=Math.abs(b[0]-a[0])<EPS?0:(g.x-a[0])/(b[0]-a[0]);front=Math.max(front,a[1]+t*(b[1]-a[1]),Math.abs(b[0]-a[0])<EPS?b[1]:-Infinity)}}if(!Number.isFinite(front))front=0;ctx.beginPath();ctx.moveTo(...planePoint(g.x,front));ctx.lineTo(PX(g.x),lay.strip);ctx.stroke()}
   ctx.setLineDash([]);ctx.globalAlpha=1;ctx.fillStyle=css.shadow;ctx.strokeStyle=css.muted;ctx.lineWidth=2;
-  if(hull.length>=3){path(ctx,hull.map(project),true);ctx.fillStyle=css.bg;ctx.fill();ctx.fillStyle=css.shadow;ctx.fill()}else if(hull.length===2){path(ctx,hull.map(project));ctx.stroke()}else{ctx.beginPath();ctx.arc(PX(P[0][0]),SHY(P[0][2]),2,0,Math.PI*2);ctx.fill()}
-  drawSliceResult(result,q);drawLine(C);
-  lblock(lay.oy3,'3D',[q.rank===3?'slice':'section']);lblock(lay.planeY,'2D',['shadow']);lblock(lay.strip,'1D',[]);
+  if(hull.length>=3){path(ctx,hull.map(project),true);ctx.fillStyle=css.bg;ctx.fill();ctx.fillStyle=planeFill();ctx.fill()}else if(hull.length===2){path(ctx,hull.map(project));ctx.stroke()}else{ctx.beginPath();ctx.arc(...planePoint(P[0][0],P[0][2]),2,0,Math.PI*2);ctx.fill()}
+  if(operation==='slice')drawSliceResult(result,q);else drawProjectedResult(result,q);drawLine(C);
+  lblock(lay.oy3,'3D',[operation==='collapse'?'shadow':q.rank===3?'slice':'section']);lblock(lay.planeY,'2D',[]);lblock(lay.strip,'1D',[]);
  }
  lblock(lay.sourceY,'4D',['projected']);
- cv.setAttribute('aria-label',`Projected ${pretty(S.name)} and its actual ${q.name||'empty'} slice, followed by shadows of that slice. Tick height represents coincident slice vertices: ${C.live.join(', ')} from left to right.`);
- $('cutPosition').setAttribute('aria-valuetext',`${cutPosition.toFixed(2)} along the fourth spatial direction; ${q.name||'no intersection'}.`);syncCutThumb();return C;
+ cv.setAttribute('aria-label',operation==='slice'?`Projected ${pretty(S.name)} and its actual ${q.name||'empty'} slice, followed by shadows of that slice. Tick height counts coincident slice vertices: ${C.live.join(', ')}.`:`Projected ${pretty(S.name)}, its whole-object 3D shadow, then 2D and 1D shadows. Tick height counts original source vertices at each line position: ${C.live.join(', ')}.`);
+ $('cutPosition').setAttribute('aria-valuetext',`${cutPosition.toFixed(2)} along the fourth spatial direction; ${q.name||'no intersection'}.`);if(operation==='slice')syncCutThumb();return C;
 }
 
 function draw(){
-  const C=compute();if(S.dim===4)return drawSectionShadows();resize();
+  const C=compute();if(S.dim===4)return drawSectionShadows();resize();if(operation==='slice')return drawLowerSlice(C);
   const {P,n,groups,gOf,exact,even,gaps}=C,big=n>100,huge=n>300;
   const q=x=>Math.round(x*1e5),groups3=projectionGroups(P,[0,1,2]),groups2=projectionGroups(P,[0,2]),map2=new Map();
   groups2.forEach((g,i)=>{const p=P[g.idx[0]];map2.set(q(p[0])+','+q(p[2]),{x:p[0],z:p[2],c:g.idx.length,g:gOf[g.idx[0]]})});
@@ -871,7 +1018,7 @@ function draw(){
   if(S.dim===2){drawFlat(C);return C;}
 
   // Quiet framing sits behind every projection, never on top of the shadow.
-  ctx.beginPath();ctx.arc(lay.ox,lay.oy3,R+4,0,Math.PI*2);ctx.strokeStyle=css.muted;ctx.globalAlpha=.06;ctx.lineWidth=1;ctx.stroke();ctx.globalAlpha=1;
+  ctx.beginPath();ctx.arc(lay.ox,lay.oy3,Math.min(R+4,lay.planeBack-lay.oy3-2),0,Math.PI*2);ctx.strokeStyle=css.muted;ctx.globalAlpha=.06;ctx.lineWidth=1;ctx.stroke();ctx.globalAlpha=1;
 
   // ---- plane + shadow ----
   const pl=plane2([...map2.values()].map(e=>[e.x,0,e.z,0]),[[0,1,0,0],[0,0,0,1]]);
@@ -882,22 +1029,15 @@ function draw(){
   // 2D -> 1D: one straight drop per line point, from the far end of its column
   ctx.setLineDash([2,3]);
   groups.forEach((g,gi)=>{let zfront=-Infinity;for(let j=0;j<silhouette.length;j++){const a=silhouette[j],b=silhouette[(j+1)%silhouette.length];if(g.x>=Math.min(a[0],b[0])-EPS&&g.x<=Math.max(a[0],b[0])+EPS){const t=Math.abs(b[0]-a[0])<EPS?0:(g.x-a[0])/(b[0]-a[0]);zfront=Math.max(zfront,a[2]+t*(b[2]-a[2]),Math.abs(b[0]-a[0])<EPS?b[2]:-Infinity)}}if(!Number.isFinite(zfront))zfront=Math.max(...g.idx.map(i=>P[i][2]));const hi=sel===gi;
-    ctx.strokeStyle=hi?css.ink:css.muted;ctx.globalAlpha=sel>=0?(hi?.85:.07):huge?.12:.3;ctx.beginPath();ctx.moveTo(PX(g.x),SHY(zfront));ctx.lineTo(PX(g.x),lay.strip);ctx.stroke()});
+    ctx.strokeStyle=hi?css.ink:css.muted;ctx.globalAlpha=sel>=0?(hi?.85:.07):huge?.12:.3;ctx.beginPath();ctx.moveTo(...planePoint(g.x,zfront));ctx.lineTo(PX(g.x),lay.strip);ctx.stroke()});
   ctx.setLineDash([]);ctx.globalAlpha=1;
   // ---- 3D: drops, glass body, edges, corners ----
   ctx.setLineDash([3,4]);
   for(let i=0;i<n;i++){const p=P[i];if(off(i)&&big)continue;ctx.strokeStyle=css.solid;ctx.globalAlpha=(sel>=0)&&!off(i)?.6:huge?.04:big?.07:.19;
-    const X=PX(p[0]);ctx.beginPath();ctx.moveTo(X,PY(p[1],p[2]));ctx.lineTo(X,SHY(p[2]));ctx.stroke()}
+    const X=PX(p[0]);ctx.beginPath();ctx.moveTo(X,PY(p[1],p[2]));ctx.lineTo(...planePoint(p[0],p[2]));ctx.stroke()}
   ctx.setLineDash([]);ctx.globalAlpha=1;
   paintSilhouette(silhouette);
-  const dep=P.map(p=>DEP(p[1],p[2]));ctx.fillStyle=css.glass;
-  if(S.F){S.F.map(f=>[f,f.reduce((s,i)=>s+dep[i],0)/f.length]).sort((a,b)=>a[1]-b[1]).forEach(([f])=>{ctx.beginPath();f.forEach((i,k)=>{const X=PX(P[i][0]),Y=PY(P[i][1],P[i][2]);k?ctx.lineTo(X,Y):ctx.moveTo(X,Y)});ctx.closePath();ctx.fill()})}
-  else{const sp=P.map(p=>[PX(p[0]),PY(p[1],p[2])]).sort((a,b)=>a[0]-b[0]||a[1]-b[1]),cr=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]),lo=[],up=[];
-    for(const p of sp){while(lo.length>1&&cr(lo[lo.length-2],lo[lo.length-1],p)<=0)lo.pop();lo.push(p)}
-    for(let i=sp.length-1;i>=0;i--){const p=sp[i];while(up.length>1&&cr(up[up.length-2],up[up.length-1],p)<=0)up.pop();up.push(p)}
-    const hh=lo.slice(0,-1).concat(up.slice(0,-1));ctx.beginPath();hh.forEach((p,k)=>k?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.closePath();ctx.fill()}
-  const cell=new Set(S.dim===4?S.cells[selectedCell]:[]);
-  for(const [i,j]of S.E.slice().sort((a,b)=>Number(cell.has(a[0])&&cell.has(a[1]))-Number(cell.has(b[0])&&cell.has(b[1])))){const appearance=edgeAppearance((dep[i]+dep[j])/2),highlight=cell.has(i)&&cell.has(j);ctx.strokeStyle=highlight?css.m2:css.solid;ctx.lineWidth=appearance.width;ctx.globalAlpha=appearance.alpha*(sel>=0?.6:1);ctx.beginPath();ctx.moveTo(PX(P[i][0]),PY(P[i][1],P[i][2]));ctx.lineTo(PX(P[j][0]),PY(P[j][1],P[j][2]));ctx.stroke()}ctx.globalAlpha=1;
+  drawThreeBody(C);
   drawLine(C);
 
   const sY=lay.strip;
@@ -912,29 +1052,32 @@ function draw(){
 
 
  bindRotation(hit);bindRotation(sourceHit);
- cv.addEventListener('click',e=>{const r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;if(Math.abs(y-lay.strip)<32){let best=-1,dist=22;(dimension===4?sectionProjection():compute()).groups.forEach((g,i)=>{const d=Math.abs(PX(g.x)-x);if(d<dist){dist=d;best=i}});sel=best===sel?-1:best}else sel=-1;draw()});
- return{draw,frames:()=>compactFrames,setShape:chooseShape,turn:rotateShared,reset:()=>{resetOrientation();syncUi();draw()},clearSelection:()=>{sel=-1},inspect:()=>({...compute(),S,M:rotation,lay,R,sel,perspective:sharedSource().P.map(perspective4),sectionChain:dimension===4?sectionProjection():null})};
+ cv.addEventListener('click',e=>{const r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;if(Math.abs(y-lay.strip)<32){let best=-1,dist=22;(dimension===4||operation==='slice'?sectionProjection():compute()).groups.forEach((g,i)=>{const d=Math.abs(PX(g.x)-x);if(d<dist){dist=d;best=i}});sel=best===sel?-1:best}else sel=-1;draw()});
+ return{draw,planePoint,frames:()=>compactFrames,setShape:chooseShape,turn:rotateShared,reset:()=>{resetOrientation();syncUi();draw()},clearSelection:()=>{sel=-1},inspect:()=>({...compute(),S,M:rotation,lay,R,sel,perspective:sharedSource().P.map(perspective4),resultChain:dimension===4||operation==='slice'?sectionProjection():null,sectionChain:operation==='slice'?sectionProjection():null})};
 }
 function draw(){readCss();return shadow.draw()}
 function redraw(){if(queued)return;queued=true;requestAnimationFrame(()=>{queued=false;draw()})}
-function cutControlGeometry(){const f=$('shadowCanvas').getBoundingClientRect(),d=$('viewDivider').getBoundingClientRect(),m=shadow.frames().source;return{centerY:f.top+m.oy,scale:m.R*Math.cos(CAMERA_E)*CONTEXT_W,dividerTop:d.top,centerX:d.left+d.width/2}}
+function cutControlGeometry(){const f=$('shadowCanvas').getBoundingClientRect(),d=$('viewDivider').getBoundingClientRect(),m=shadow.frames().source;return{centerY:f.top+m.oy,scale:m.R*(dimension===2?1:Math.cos(CAMERA_E)*(dimension===4?CONTEXT_W:1)),dividerTop:d.top,centerX:d.left+d.width/2}}
 function syncCutThumb(){const g=cutControlGeometry();const top=g.centerY-g.dividerTop-g.scale*1.2,height=g.scale*2.4;for(const el of [$('dividerRule'),$('cutPosition')]){el.style.top=top+'px';el.style.height=height+'px'}$('cutThumb').style.top=(g.centerY-g.dividerTop-g.scale*cutPosition)+'px'}
 function cutFromY(y){const g=cutControlGeometry();const value=Math.max(-1.2,Math.min(1.2,(g.centerY-y)/g.scale)),nearest=selectedModel().criticalLevels.reduce((best,s)=>Math.abs(s-value)<Math.abs(best-value)?s:best,Infinity);return Math.abs(nearest-value)*g.scale<=3?nearest:Math.round(value*10000)/10000}
 const input=$('cutPosition');
-input.addEventListener('pointerdown',e=>{if(dimension!==4||e.isPrimary===false||e.button>0||cutPointer!==null)return;const g=cutControlGeometry(),y=g.centerY-g.scale*cutPosition,grab=Math.abs(e.clientX-g.centerX)<=10&&Math.abs(e.clientY-y)<=10;cutGrabOffset=grab?e.clientY-y:0;cutPointer=e.pointerId;input.focus({preventScroll:true});input.setPointerCapture(e.pointerId);e.preventDefault();if(!grab)setCutPosition(cutFromY(e.clientY))});
+input.addEventListener('pointerdown',e=>{if(operation!=='slice'||e.isPrimary===false||e.button>0||cutPointer!==null)return;const g=cutControlGeometry(),y=g.centerY-g.scale*cutPosition,grab=Math.abs(e.clientX-g.centerX)<=10&&Math.abs(e.clientY-y)<=10;cutGrabOffset=grab?e.clientY-y:0;cutPointer=e.pointerId;input.focus({preventScroll:true});input.setPointerCapture(e.pointerId);e.preventDefault();if(!grab)setCutPosition(cutFromY(e.clientY))});
 input.addEventListener('pointermove',e=>{if(cutPointer!==e.pointerId)return;e.preventDefault();setCutPosition(cutFromY(e.clientY-cutGrabOffset))});
 ['pointerup','pointercancel','lostpointercapture'].forEach(t=>input.addEventListener(t,e=>{if(cutPointer===e.pointerId){cutPointer=null;cutGrabOffset=0}}));
 input.oninput=e=>setCutPosition(Number(e.target.value));
 input.addEventListener('keydown',e=>{const steps={ArrowUp:.01,ArrowRight:.01,ArrowDown:-.01,ArrowLeft:-.01,PageUp:.2,PageDown:-.2};if(e.key==='Home'||e.key==='End'||e.key in steps){e.preventDefault();const v=e.key==='Home'?-1.2:e.key==='End'?1.2:cutPosition+steps[e.key];const target=Math.round(Math.max(-1.2,Math.min(1.2,v))*100)/100,dir=Math.sign(target-cutPosition),crossed=selectedModel().criticalLevels.filter(s=>dir*(s-cutPosition)>1e-10&&dir*(target-s)>=0).sort((a,b)=>dir*(a-b));setCutPosition((e.key==='Home'||e.key==='End')?target:crossed[0]??target)}});
 
+$('gapRange').oninput=e=>setViewOptions({gap:Number(e.target.value)});$('tiltRange').oninput=e=>setViewOptions({tilt:Number(e.target.value)});$('resetViewControls').onclick=()=>{layerGaps[dimension]=defaultGaps[dimension];planeTilt=CAMERA_E;syncViewControls();draw()};
 $('rotateSlice').onclick=rotateSlice;
-$('viewShadow').onclick=()=>choosePresentation('shadow');$('viewTopdown').onclick=()=>choosePresentation('topdown');
+$('operationSlice').onclick=()=>chooseOperation('slice');$('operationCollapse').onclick=()=>chooseOperation('collapse');
+$('planeViewButton').onclick=cyclePlaneView;
 new ResizeObserver(()=>redraw()).observe($('shadowStage'));
 if(document.modelContext?.registerTool){const life=new AbortController(),reg=t=>{try{Promise.resolve(document.modelContext.registerTool(t,{signal:life.signal})).catch(()=>{})}catch{}};
- reg({name:'set_presentation',description:'Change the viewing angle of the same 2D shadow. Geometry and cut stay fixed.',inputSchema:{type:'object',properties:{view:{type:'string',enum:['shadow','topdown']}},required:['view'],additionalProperties:false},execute:i=>{choosePresentation(i?.view);return{view:presentation}}});
+ reg({name:'set_operation',description:'Choose an exact one-dimension-lower slice or collapse the whole shape by dropping a coordinate.',inputSchema:{type:'object',properties:{operation:{type:'string',enum:['slice','collapse']}},required:['operation'],additionalProperties:false},execute:i=>{chooseOperation(i?.operation);return{operation}}});
+ reg({name:'set_presentation',description:'Change the viewing angle of the same lower-dimensional result. Geometry and cut stay fixed.',inputSchema:{type:'object',properties:{view:{type:'string',enum:['angled','topdown','horizon']}},required:['view'],additionalProperties:false},execute:i=>{choosePresentation(i?.view);return{view:presentation}}});
  reg({name:'set_shape',description:'Choose a shape in the shadow explorer.',inputSchema:{type:'object',properties:{shape:{type:'string',enum:Object.values(sliceChoices).flat()}},required:['shape'],additionalProperties:false},execute:i=>{chooseShape(i?.shape);return{shape:sourceNames[dimension],dimension}}});
- reg({name:'set_section_position',description:'Move the 3D slice through the selected 4D shape.',inputSchema:{type:'object',properties:{position:{type:'number',minimum:-1.2,maximum:1.2}},required:['position'],additionalProperties:false},execute:i=>{if(dimension!==4)throw new Error('Choose a 4D shape to move its slice.');setCutPosition(i.position);return{dimension,position:cutPosition,section:sliceData().name}}});
- reg({name:'read_projection',description:'Read the linked source and vertex multiplicities in the shadow chain.',inputSchema:{type:'object',properties:{},additionalProperties:false},execute:()=>{const q=shadow.inspect(),p=q.sectionChain||q;return{shape:q.S.name,dimension:q.S.dim,operation:q.sectionChain?'shadows of the actual slice':'whole-object shadows',vertices:p.n,positions:p.groups.length,multiplicities:p.live}}});
+ reg({name:'set_section_position',description:'Move the lower-dimensional cutter through the selected shape.',inputSchema:{type:'object',properties:{position:{type:'number',minimum:-1.2,maximum:1.2}},required:['position'],additionalProperties:false},execute:i=>{if(operation!=='slice')throw new Error('Choose Slice to move the cut.');setCutPosition(i.position);return{dimension,position:cutPosition,section:sliceData().name}}});
+ reg({name:'read_projection',description:'Read the linked source and vertex multiplicities in the shadow chain.',inputSchema:{type:'object',properties:{},additionalProperties:false},execute:()=>{const q=shadow.inspect(),p=q.resultChain||q;return{shape:q.S.name,dimension:q.S.dim,operation:operation==='slice'?'slice, then shadows':'whole-object collapse',vertices:p.n,positions:p.groups.length,multiplicities:p.live}}});
  window.addEventListener('pagehide',()=>life.abort(),{once:true});
 }
 // initialization
