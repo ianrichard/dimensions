@@ -14,7 +14,7 @@ Open http://localhost:8000 in a modern browser. The complete app is in `dist/`; 
 
 ## Snapshot
 
-This backup preserves version 14, including the visual refinement. The app files are byte-identical to source commit `97e30e9d1f01d8efd7c15cc388692d8bbabee235`.
+This backup preserves version 15, including the refined layer layout and Shadow/Topdown display toggle. The app files are byte-identical to source commit `ce516721565975f55e5ea28726894b16c38e485a`.
 
 - `dist/index.html`: interface
 - `dist/style.css`: styles
