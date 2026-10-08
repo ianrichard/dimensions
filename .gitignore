@@ -1,0 +1,5 @@
+.DS_Store
+.env
+.env.*
+.openai/
+node_modules/
