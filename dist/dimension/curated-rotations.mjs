@@ -1,13 +1,4 @@
-/* Exact-direction rotation stops for Dimension Collapse. No geometry is rewritten.
- * Matrices are row-major, act on column vectors, and belong to SO(4).
- * The active SO(2)/SO(3) block is embedded in SO(4); unused axes stay fixed.
- * For 3D the world cutter coordinate is y; for 2D it is y; for 4D it is w.
- */
-(function (root, factory) {
-  const api = factory();
-  if (typeof module === 'object' && module.exports) module.exports = api;
-  else root.CuratedRotations = api;
-})(typeof globalThis === 'object' ? globalThis : this, function () {
+export const CuratedRotations = (() => {
   'use strict';
   const PHI = (1 + Math.sqrt(5)) / 2;
   const DIMENSIONS = Object.freeze({Square:2,Triangle:2,Cube:3,Tetra:3,Octa:3,Icosa:3,Dodeca:3,Tesseract:4,'5-cell':4,'16-cell':4});
@@ -128,4 +119,4 @@
     }};
   }
   return {PHI,DIMENSIONS,identity,transpose,multiply,transform,determinant,givens,cutAxis,fromX,fromCut,presetsFor,projectedLevels,cutterBounds,cutAtFraction,orientedModel,rotationPath};
-});
+})();
