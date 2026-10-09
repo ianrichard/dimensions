@@ -127,7 +127,7 @@ function cutterFrame(s){const lift=v=>[...v,s];return{lift,project:(v,f)=>projec
 function drawCutWindow4(f,s){
  const L=1.02,V=Array.from({length:8},(_,bits)=>[0,1,2].map(k=>(bits&(1<<k)?L:-L))),E=[];
  for(let i=0;i<8;i++)for(let k=0;k<3;k++){const j=i^(1<<k);if(i<j)E.push([i,j])}
- const c=f.c;c.save();c.beginPath();c.rect(64,8,f.w-108,Math.max(1,2*(f.oy-8)));c.clip();c.setLineDash([2,5]);graph(c,V,E,p=>cutterFrame(s).project(p,f),css.muted,.13,.65);c.restore();
+ const c=f.c;c.save();c.beginPath();c.rect(f.clip?.x??64,f.clip?.y??8,f.clip?.width??(f.w-108),f.clip?.height??Math.max(1,2*(f.oy-8)));c.clip();c.setLineDash([2,5]);graph(c,V,E,p=>cutterFrame(s).project(p,f),css.muted,.13,.65);c.restore();
 }
 function drawSliceSource(f,q){
  drawCutWindow4(f,cutPosition);
@@ -175,11 +175,11 @@ function spacingCue({gaps}, {freeOrientation, dimension, cutPosition = 0,
   const unit = Math.min(...gaps);
   const labels = gaps.map(gap => {
     const ratio = gap / unit;
-    return Math.abs(ratio - 1) <= tolerance ? '1'
+    return [1,2,3,4].some(n=>Math.abs(ratio-n)<=tolerance)?String(Math.round(ratio))
       : Math.abs(ratio - PHI) <= tolerance ? 'φ' : null;
   });
   if (labels.some(label => label === null)) return null;
-  return {labels, kind: labels.includes('φ') ? 'golden' : 'equal', unit};
+  return {labels, kind: labels.includes('φ') ? 'golden' : labels.every(x=>x==='1')?'equal':'integer', unit};
 }
 
 
@@ -198,7 +198,12 @@ function createShadowExplorer(){
  // Layout depends on viewport, dimension and explicit presentation only.
  // All shapes have unit circumradius; every section remains inside that ball.
  function layout(){
-  W=cv.clientWidth||800;const labelX=W>760?24:16;ctx.font='400 13px system-ui, sans-serif';const labelWidth=Math.min(104,Math.max(62,...sliceChoices[S.dim].map(name=>ctx.measureText(pretty(name)).width))),LW=labelX+labelWidth+14,right=40,avail=W-LW-right,k=Math.sin(planeTilt),b=shapeVisualBounds(S.name,S.dim,k);
+  W=cv.clientWidth||800;const labelX=W>760?24:16;ctx.font='400 13px system-ui, sans-serif';const labelWidth=28,LW=labelX+labelWidth+14,right=40,avail=W-LW-right,k=Math.sin(planeTilt),b=shapeVisualBounds(S.name,S.dim,k);
+  if(S.dim===4){
+   const gap=40,cell=(W-2*labelX-gap)/2;R=Math.max(24,Math.min(136,(cell-12)/2));
+   const centerY=38+b.source*R;H=centerY+b.source*R+20;
+   return{pair:true,LW:labelX,labelX,labelWidth,sourceX:labelX+cell/2,resultX:W-labelX-cell/2,ox:W-labelX-cell/2,sourceTop:38,sourceY:centerY,oy3:centerY,top3:centerY-R,sourceBound:b.source,bodyBound:1,gaps:{...layerGaps},cell,gap,strip:NaN};
+  }
   R=Math.max(32,Math.min(136,avail/2-8));const o={LW,labelX,labelWidth,ox:LW+avail/2,planeScale:k,planeDepth:0,planeRadius:b.body,bodyBound:b.body,sourceBound:b.source,gaps:{...layerGaps}};
   if(S.dim===4){o.sourceTop=8;o.sourceY=8+b.source*R;o.oy3=o.sourceY+b.first*R+layerGaps[4];o.top3=o.oy3-b.body*R;}
   else{o.top3=16;o.oy3=o.top3+R;}
@@ -209,10 +214,10 @@ function createShadowExplorer(){
   for(const key of ['sourceTop','sourceY','oy3','top3','planeY','planeBack','planeFront','strip'])if(o[key]!==undefined)o[key]+=shift;
   H=Math.max(o.oy3+R,S.dim===4?o.sourceY+b.source*R:0,S.dim>=3?o.planeFront:0,o.strip+30)+30;return o;
  }
- function resize(){lay=layout();const d=Math.min(2,devicePixelRatio||1);cv.style.height=H+'px';if(cv.width!==Math.round(W*d)||cv.height!==Math.round(H*d)){cv.width=Math.round(W*d);cv.height=Math.round(H*d)}ctx.setTransform(d,0,0,d,0,0);if(S.dim!==4)compactFrames={source:{c:ctx,w:W,h:H,R,ox:lay.ox,oy:lay.oy3},result:{c:ctx,w:W,h:H,R,ox:lay.ox,oy:S.dim===3?lay.planeY:lay.strip},planeY:lay.planeY,H};const side=2*R;hit.style.width=hit.style.height=side+'px';hit.style.left=(lay.ox-side/2)+'px';hit.style.top=(lay.oy3-side/2)+'px';if(S.dim===4){const height=2*lay.sourceBound*R;sourceHit.style.width=side+'px';sourceHit.style.height=height+'px';sourceHit.style.left=(lay.ox-side/2)+'px';sourceHit.style.top=lay.sourceTop+'px'}}
+ function resize(){lay=layout();const d=Math.min(2,devicePixelRatio||1);cv.style.height=H+'px';if(cv.width!==Math.round(W*d)||cv.height!==Math.round(H*d)){cv.width=Math.round(W*d);cv.height=Math.round(H*d)}ctx.setTransform(d,0,0,d,0,0);if(S.dim!==4)compactFrames={source:{c:ctx,w:W,h:H,R,ox:lay.ox,oy:lay.oy3},result:{c:ctx,w:W,h:H,R,ox:lay.ox,oy:S.dim===3?lay.planeY:lay.strip},planeY:lay.planeY,H};const side=2*R;hit.style.width=hit.style.height=side+'px';hit.style.left=(lay.ox-side/2)+'px';hit.style.top=(lay.oy3-side/2)+'px';if(S.dim===4){const height=2*lay.sourceBound*R;sourceHit.style.width=side+'px';sourceHit.style.height=height+'px';sourceHit.style.left=((lay.sourceX??lay.ox)-side/2)+'px';sourceHit.style.top=lay.sourceTop+'px'}}
  const PX=x=>lay.ox+R*x,PY=(y,z)=>lay.oy3-R*(y*CE-z*SE),planePoint=(x,z)=>[lay.ox+R*x,lay.planeY+R*lay.planeScale*z],SHY=z=>planePoint(0,z)[1],DEP=(y,z)=>y*SE+z*CE;
 function lblock(center,title,lines){
-  const source=title===S.dim+'D';lines=source?[pretty(S.name)]:[];
+  lines=[];
   const total=14+19*lines.length;let y=center-total/2+11;
   ctx.textAlign='left';ctx.fillStyle=css.ink;ctx.font='600 13px system-ui, sans-serif';ctx.fillText(title,lay.labelX,y);y+=19;
   ctx.font='400 13px system-ui, sans-serif';ctx.fillStyle=css.muted;
@@ -244,6 +249,7 @@ function planeFill(){const back=planePoint(0,-lay.planeRadius),front=planePoint(
 function paintSilhouette(points){if(points.length<3)return;path(ctx,points.map(p=>planePoint(p[0],p[2])),true);ctx.globalAlpha=1;ctx.fillStyle=css.bg;ctx.fill();ctx.fillStyle=planeFill();ctx.fill()}
 function drawThreeBody(C){drawMesh3({c:ctx,w:W,h:H,R,ox:lay.ox,oy:lay.oy3},{verts:C.P,edges:S.E,facets:S.F})}
 function drawLowerSlice(sourceData){
+ $('viewDivider').style.left='auto';$('viewDivider').style.right='0px';
  const C=sectionProjection(),q=C.section,{P,groups}=C,f=compactFrames.source;
  ctx.clearRect(0,0,W,H);if(sel>=groups.length)sel=-1;
  // A bounded drawing window in the infinite cutter. It never clips the geometry.
@@ -280,27 +286,24 @@ function sectionProjection(){
  const gaps=groups.slice(1).map((g,i)=>g.x-groups[i].x),even=gaps.length<2||gaps.every(g=>Math.abs(g-gaps[0])<EPS);return{section,P,n:P.length,groups,gOf,gaps,even,exact:true,live:groups.map(g=>g.idx.length)};
 }
 function drawSectionShadows(){
- const C=sectionProjection(),{P,groups,section:q}=C;resize();ctx.clearRect(0,0,W,H);
- const source={c:ctx,w:W,h:H,R,ox:lay.ox,oy:lay.sourceY},result={c:ctx,w:W,h:H,R,ox:lay.ox,oy:lay.oy3};compactFrames={source,result,planeY:lay.planeY,H,bound4:lay.sourceBound,planeScale:lay.planeScale,planeDepth:lay.planeDepth,gaps:lay.gaps};
- const divider=$('viewDivider');divider.style.height=(lay.sourceY+lay.sourceBound*R)+'px';divider.style.top='0px';
- if(sel>=groups.length)sel=-1;
- // Correspondence links an actual section vertex or the same original source vertex.
- ctx.strokeStyle=css.solid;ctx.lineWidth=.85;ctx.setLineDash([3,4]);ctx.globalAlpha=.23;
- if(P.length){const xs=P.map(p=>p[0]),lo=Math.min(...xs),hi=Math.max(...xs);q.verts.forEach((p,i)=>{if(Math.abs(p[0]-lo)>EPS&&Math.abs(p[0]-hi)>EPS)return;const a=operation==='slice'?cutterFrame(cutPosition).project(p,source):projectContext(q.source.baseVerts[i],source),b=projectResult(p,result);ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke()})}ctx.setLineDash([]);ctx.globalAlpha=1;
- if(operation==='slice')drawSliceSource(source,q);else drawSource(source,q.source.baseVerts,q.source.edges);
- if(P.length){
-  const unique=[];for(const p of P){const a=[p[0],p[2]];if(!unique.some(b=>Math.hypot(a[0]-b[0],a[1]-b[1])<EPS))unique.push(a)}const hull=unique.length===1?unique:hull2(unique),project=p=>planePoint(p[0],p[1]);
-  ctx.setLineDash([3,4]);ctx.strokeStyle=css.solid;ctx.globalAlpha=.19;ctx.lineWidth=.85;
-  for(const p of P){const a=projectResult(p,result);ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...planePoint(p[0],p[2]));ctx.stroke()}
-  ctx.globalAlpha=.3;
-  for(const g of groups){let front=-Infinity;for(let i=0;i<hull.length;i++){const a=hull[i],b=hull[(i+1)%hull.length];if(g.x>=Math.min(a[0],b[0])-EPS&&g.x<=Math.max(a[0],b[0])+EPS){const t=Math.abs(b[0]-a[0])<EPS?0:(g.x-a[0])/(b[0]-a[0]);front=Math.max(front,a[1]+t*(b[1]-a[1]),Math.abs(b[0]-a[0])<EPS?b[1]:-Infinity)}}if(!Number.isFinite(front))front=0;ctx.beginPath();ctx.moveTo(...planePoint(g.x,front));ctx.lineTo(PX(g.x),lay.strip);ctx.stroke()}
-  ctx.setLineDash([]);ctx.globalAlpha=1;ctx.fillStyle=css.shadow;ctx.strokeStyle=css.muted;ctx.lineWidth=2;
-  if(hull.length>=3){path(ctx,hull.map(project),true);ctx.fillStyle=css.bg;ctx.fill();ctx.fillStyle=planeFill();ctx.fill()}else if(hull.length===2){path(ctx,hull.map(project));ctx.stroke()}else{ctx.beginPath();ctx.arc(...planePoint(P[0][0],P[0][2]),2,0,Math.PI*2);ctx.fill()}
-  if(operation==='slice')drawSliceResult(result,q);else drawProjectedResult(result,q);drawLine(C);
-  lblock(lay.oy3,'3D',[operation==='collapse'?'shadow':q.rank===3?'slice':'section']);lblock(lay.planeY,'2D',[]);lblock(lay.strip,'1D',[]);
+ const C=sectionProjection(),{section:q}=C;resize();ctx.clearRect(0,0,W,H);
+ const source={c:ctx,w:W,h:H,R,ox:lay.sourceX,oy:lay.sourceY,clip:{x:lay.labelX,y:34,width:lay.cell,height:H-40}},result={c:ctx,w:W,h:H,R,ox:lay.resultX,oy:lay.oy3};
+ compactFrames={source,result,H,bound4:lay.sourceBound,gaps:lay.gaps,pair:true};
+ const divider=$('viewDivider');divider.style.left=(W/2-22)+'px';divider.style.right='auto';divider.style.height=H+'px';divider.style.top='0px';
+ // Every source vertex contributes to Collapse. The faint scaffold uses the
+ // exact original edges under the same drop-w map as the filled convex hull.
+ if(operation==='collapse'){
+  drawSource(source,q.source.baseVerts,q.source.edges);
+  graph(ctx,q.source.baseVerts,q.source.edges,v=>projectResult(v.slice(0,3),result),css.source,.10,.65);
+  drawProjectedResult(result,q);
+  const mid=W/2,y=lay.sourceY;ctx.strokeStyle=css.muted;ctx.globalAlpha=.28;ctx.lineWidth=.8;path(ctx,[[mid-8,y],[mid+8,y],[mid+4,y-3]]);ctx.stroke();ctx.globalAlpha=1;
+ }else{
+  drawSliceSource(source,q);
+  if(q.verts.length)drawSliceResult(result,q);
  }
- lblock(lay.sourceY,'4D',['projected']);
- cv.setAttribute('aria-label',operation==='slice'?`Projected ${pretty(S.name)} and its actual ${q.name||'empty'} slice, followed by shadows of that slice. The faint box outlines a finite window of the infinite 3D cutting space. Dot area represents coincident slice vertices: ${C.live.join(', ')}.`:`Projected ${pretty(S.name)}, its whole-object 3D shadow, then 2D and 1D shadows. Dot area represents original source vertices at each line position: ${C.live.join(', ')}.`);
+ ctx.textAlign='left';ctx.font='600 13px system-ui, sans-serif';ctx.fillStyle=css.ink;ctx.fillText('4D',lay.labelX,21);ctx.fillText('3D',W/2+lay.gap/2,21);
+ ctx.font='400 11px system-ui, sans-serif';ctx.fillStyle=css.muted;ctx.fillText('projected',lay.labelX+26,21);ctx.fillText(operation==='slice'?'slice':'shadow',W/2+lay.gap/2+26,21);
+ cv.setAttribute('aria-label',operation==='slice'?`Projected ${pretty(S.name)} on the left and its actual ${q.name||'empty'} 3D slice on the right. Both use the same 4D source and cut. The faint cutter is a finite window in an infinite 3D space.`:`Projected ${pretty(S.name)} on the left and its whole-object 3D shadow on the right. Every source vertex contributes to the convex hull; the faint right-hand scaffold is the same source edges projected by dropping w.`);
  $('cutPosition').setAttribute('aria-valuetext',`${cutPosition.toFixed(2)} along the fourth spatial direction; ${q.name||'no intersection'}.`);if(operation==='slice')syncCutThumb();return C;
 }
 
@@ -404,7 +407,7 @@ listen(input,'keydown',e=>{const steps={ArrowUp:.01,ArrowRight:.01,ArrowDown:-.0
   rotate(dx,dy){assertAlive();if(!Number.isFinite(dx)||!Number.isFinite(dy))throw new Error('Rotation deltas must be finite.');rotateShared(dx,dy)},
   setView(value){assertAlive();setViewOptions(value)},setPalette(value){assertAlive();choosePalette(value)},play(){assertAlive();autoEnabled=true;startAuto()},pause(){assertAlive();stopAuto()},stop(){assertAlive();stopAuto()},
   subscribe(fn){assertAlive();if(typeof fn!=='function')throw new Error('Pass a listener.');subscribers.add(fn);fn(state());return()=>subscribers.delete(fn)},
-  readProjection(){assertAlive();const q=shadow.inspect(),p=q.resultChain||q;return{shape:state().shape,dimension,operation,vertices:p.n,positions:p.groups.length,multiplicities:p.live||p.groups.map(g=>g.idx.length)}},
+  readProjection(){assertAlive();const q=shadow.inspect(),p=q.resultChain||q;return{shape:state().shape,dimension,operation,statisticsDimension:1,vertices:p.n,positions:p.groups.length,multiplicities:p.live||p.groups.map(g=>g.idx.length),displayedDimensions:dimension===4?[4,3]:dimension===3?[3,2,1]:[2,1],...(dimension===4?{resultPositions3D:projectionGroups(p.section.verts,[0,1,2]).length}:{})}},
   destroy(){if(destroyed)return;destroyed=true;stopAuto();changeAnimation?.cancel();if(redrawFrame!==null)cancelAnimationFrame(redrawFrame);observer.disconnect();for(const off of cleanup)off();for(const el of Object.values(parts)){if(el.hasPointerCapture?.(cutPointer))el.releasePointerCapture(cutPointer)}subscribers.clear();stage.remove()}
  };
  return api;

@@ -54,12 +54,12 @@ export const CuratedRotations = (() => {
     if(!n||model.dimension!==n||!model.rawV?.length)throw new Error('Pass a supported sliceModel with rawV and dimension.');
     const V=model.rawV;
     const pose=(id,label,matrix,extra={})=>({id,label,matrix,...extra});
-    const stops=[pose('off-angle','Off angle',fromX([2,3,7,17].slice(0,n)),{generic:true})];
+    const stops=[];
     const even={Square:[1,2],Triangle:[1,0],Cube:[1,2,4],Tetra:[0,1,2],Octa:[1,3,5],Tesseract:[1,2,4,8],'16-cell':[1,3,5,7]};
     // A centered regular simplex has vi·vj=-1/n for i!=j. Thus for
     // d=sum_i (i-n/2)vi, vi·d=(1+1/n)(i-n/2): exact equal spacing.
     if(name==='5-cell')even[name]=Array.from({length:n},(_,j)=>V.reduce((s,v,i)=>s+(i-n/2)*v[j],0));
-    if(even[name])stops.push(pose('even-spacing','Even spacing',fromX(even[name]),{spacing:'even',expectedLevels:V.length}));
+    if(n<4&&even[name])stops.push(pose('even-spacing','Even spacing',fromX(even[name]),{spacing:'even',expectedLevels:V.length}));
     if(name==='Icosa'||name==='Dodeca')stops.push(pose('golden-spacing','Golden spacing',fromX([1,0,0]),{spacing:'golden',gapRatios:name==='Icosa'?[1,PHI,PHI,1]:[PHI,1,PHI,PHI,1,PHI]}));
     const specifications={
       Square:[['corner-first','Corner first',[1,1]],['side-first','Side first',[0,1]]],

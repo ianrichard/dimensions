@@ -9,15 +9,16 @@ for(const[id,p]of Object.entries(colorPresets)){const b=document.createElement('
 let lastShape=null;
 const off=stage.subscribe(state=>{
  const changedGroup=shapeButtons(state.dimension);selectedByDimension[state.dimension]=state.shape;for(const b of $('dimensionOptions').children)b.setAttribute('aria-pressed',+b.dataset.dimension===state.dimension);
+ $('shapeTitle').textContent=state.name;
  $('operationSlice').setAttribute('aria-pressed',state.operation==='slice');$('operationCollapse').setAttribute('aria-pressed',state.operation==='collapse');
  for(const b of $('shapeIcons').children){const selected=b.dataset.shape===state.shape;b.setAttribute('aria-pressed',selected);if(changedGroup&&selected)$('shapeIcons').scrollLeft=Math.max(0,b.offsetLeft-($('shapeIcons').clientWidth-b.offsetWidth)/2)}
  if(lastShape!==state.shape){lastShape=state.shape;$('poseButtons').replaceChildren();state.poses.forEach((p,i)=>{const b=document.createElement('button');b.type='button';b.className='pose-button';b.onclick=()=>stage.selectPose(i);$('poseButtons').appendChild(b)})}
  for(const[i,b]of [...$('poseButtons').children].entries()){const active=i===state.poseIndex&&(!state.freeOrientation||state.transitioning);b.textContent=state.poses[i].label;b.setAttribute('aria-pressed',active);b.style.setProperty('--progress',i===state.poseIndex&&state.playing?state.progress:0)}
- for(const n of[2,3,4]){$('gapRange'+n).value=state.gaps[n];$('gapValue'+n).textContent=state.gaps[n]+' px';$('gapControl'+n).hidden=state.dimension<n}
- $('tiltRange').value=state.tilt;$('tiltValue').textContent=Math.round(state.tilt)+'°';$('tiltControl').hidden=state.dimension===2;
+ for(const n of[2,3,4]){$('gapRange'+n).value=state.gaps[n];$('gapValue'+n).textContent=state.gaps[n]+' px';$('gapControl'+n).hidden=state.dimension===4||state.dimension<n}
+ $('tiltRange').value=state.tilt;$('tiltValue').textContent=Math.round(state.tilt)+'°';$('tiltControl').hidden=state.dimension!==3;$('gapNote').hidden=state.dimension===4;$('viewLab').hidden=state.dimension===4;
  for(const b of $('colorPresets').children)b.setAttribute('aria-pressed',b.dataset.palette===state.palette);
  const moving=state.playing||state.transitioning;$('playPause').setAttribute('aria-label',moving?'Pause rotation':'Play rotation');$('playPause').title=state.reducedMotion?'Automatic rotation is disabled by your reduced-motion preference':moving?'Pause rotation':'Play rotation';$('playPause').disabled=state.reducedMotion;$('playPause').innerHTML=moving?'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>':'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg>';
- $('sceneThought').textContent=state.dimension===4?(state.operation==='slice'?'The 4D source is projected here. Can you predict its next 3D slice?':'The 4D source is projected here. What can its 3D shadow tell you?'):state.operation==='slice'?'Move the cut. Can you predict the next shape?':'How much of a shape can its shadow tell you?';
+ $('sceneThought').textContent=state.dimension===4?(state.operation==='slice'?'Move the cutter through the 4D shape. The right shows its actual 3D slice.':'The left diagram represents the 4D shape. The right shows its whole-object 3D shadow.'):state.operation==='slice'?'Move the cut. Can you predict the next shape?':'How much of a shape can its shadow tell you?';
  for(const[k,v]of Object.entries(state.colors))document.documentElement.style.setProperty('--'+k,v);
 });
 for(const n of[2,3,4])$('gapRange'+n).oninput=e=>stage.setView({gap:Number(e.target.value),stage:n});$('tiltRange').oninput=e=>stage.setView({tilt:Number(e.target.value)});

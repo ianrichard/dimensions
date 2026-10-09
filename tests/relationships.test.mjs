@@ -1,0 +1,10 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';
+import {sliceModel,intersectSection,projectionHull} from '../dist/dimension/geometry.mjs';
+import {CuratedRotations as R} from '../dist/dimension/curated-rotations.mjs';
+import {shapes} from '../dist/dimension/shapes.mjs';
+const oriented=(shape,id)=>{const base=sliceModel(shape.key,shape.dimension),pose=R.presetsFor(base).find(p=>p.id===id);assert(pose);return {base,pose,P:base.rawV.map(v=>R.transform(pose.matrix,v)),model:R.orientedModel(base,pose.matrix)}};
+const ratios=P=>{const levels=R.projectedLevels(P),gaps=levels.slice(1).map((p,i)=>p.value-levels[i].value),unit=Math.min(...gaps);return gaps.map(x=>x/unit)};
+const near=(actual,expected)=>{assert.equal(actual.length,expected.length);actual.forEach((x,i)=>assert(Math.abs(x-expected[i])<1e-9))};
+test('every stop has a visible curated purpose; no generic or hidden 4D line-spacing stop',()=>{for(const s of shapes){const poses=R.presetsFor(sliceModel(s.key,s.dimension));assert(poses.length>=2);assert(!poses.some(p=>p.id==='off-angle'));if(s.dimension===4)assert(!poses.some(p=>p.spacing))}});
+test('curated integer labels measure adjacent projected gaps',()=>{let x=oriented(shapes.find(s=>s.id==='octahedron'),'face-first');near(ratios(x.P),[1,1,2,1,1]);x=oriented(shapes.find(s=>s.id==='tetrahedron'),'vertex-face');near(ratios(x.P),[1,1,3]);x=oriented(shapes.find(s=>s.id==='cube'),'corner-first');near(ratios(intersectSection(x.model,0).verts),[1,3,2,3,1])});
+test('a tesseract corner-first shadow and slice are mathematically distinct',()=>{const x=oriented(shapes.find(s=>s.id==='tesseract'),'corner-first'),h=projectionHull(x.P),q=intersectSection(x.model,0);assert.deepEqual([h.vertices.length,h.edges.length,h.facets.length],[14,24,12]);assert.deepEqual([q.verts.length,q.edges.length,q.facets.length],[6,12,8])});
