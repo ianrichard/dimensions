@@ -1,4 +1,5 @@
 import {PHI,I4,mul4,mm4,giv,FULL,EPS,get,plane2,projectionGroups,sliceModel,intersectSection,projectionHull} from './geometry.mjs';
+import {convexVisibility3} from './visibility.mjs';
 import {CuratedRotations} from './curated-rotations.mjs';
 import {resolveShape,shapes,defaultColors,colorPresets} from './shapes.mjs';
 export {shapes,colorPresets,shapeIconPaths,shapeIconSvg} from './shapes.mjs';
@@ -11,19 +12,19 @@ export function createDimension(host, options={}) {
  const stage=document.createElement('div');stage.className='dimension-stage';
  stage.innerHTML=`<div data-part="viewDivider" class="dimension-divider" hidden><span data-part="dividerRule" class="dimension-rule" aria-hidden="true"></span><span data-part="cutThumb" class="dimension-thumb" aria-hidden="true"></span><input data-part="cutPosition" class="dimension-cut" type="range" min="-1" max="1" step="any" value="0" orient="vertical" aria-orientation="vertical" aria-label="Slice position" title="Move the slice up or down"></div><canvas data-part="shadowCanvas" class="dimension-canvas" aria-label="Linked projections"></canvas><div data-part="shadowSourceHit" class="dimension-hit" tabindex="0" role="group" aria-label="Rotate the 4D source" title="Drag to rotate"></div><div data-part="shadowHit" class="dimension-hit" tabindex="0" role="group" aria-label="Drag or use arrow keys to rotate. Home returns to the selected pose." title="Drag to rotate"></div><span data-part="poseStatus" class="dimension-sr" aria-live="polite"></span>`;
  host.appendChild(stage);const parts=Object.fromEntries([...stage.querySelectorAll('[data-part]')].map(el=>[el.dataset.part,el]));const $=key=>parts[key];
- const cleanup=[],subscribers=new Set();let destroyed=false,ready=false,redrawFrame=null,autoEnabled=options.autoRotate!==false,colors={...defaultColors};
+ const cleanup=[],subscribers=new Set();let destroyed=false,ready=false,redrawFrame=null,changeAnimation=null,autoEnabled=options.autoRotate!==false,colors={...defaultColors};
  const listen=(el,type,fn,opts)=>{el.addEventListener(type,fn,opts);cleanup.push(()=>el.removeEventListener(type,fn,opts))};
  const requestAnimationFrame=fn=>win.requestAnimationFrame(fn),cancelAnimationFrame=id=>win.cancelAnimationFrame(id),performance=win.performance,devicePixelRatio=win.devicePixelRatio||1;
  const motionPreference=win.matchMedia?.('(prefers-reduced-motion: reduce)')||{matches:false};let reduce=motionPreference.matches;
  function setColors(values={}){for(const [key,value]of Object.entries(values)){if(!(key in defaultColors)||typeof value!=='string')throw new Error('Use supported color names and CSS color strings.');colors[key]=value;stage.style.setProperty('--dimension-'+key,value)}}
- function state(progress=autoPlaying&&!motion?Math.min(1,(performance.now()-holdStart)/HOLD_MS):0){return{shape:resolveShape(sourceNames[dimension]).id,name:pretty(sourceNames[dimension]),dimension,operation,cut:cutPosition,cutBounds:cutLimits(),poseIndex,poses:poseList.map(p=>({id:p.id,label:operation==='slice'&&p.spacing?(p.spacing==='even'?'Even source':'Golden source'):p.label})),playing:autoPlaying,transitioning:!!motion,progress,freeOrientation,gaps:{...layerGaps},tilt:planeTilt*180/Math.PI,palette,colors:{...colors}}}
+ function state(progress=autoPlaying&&!motion?Math.min(1,(performance.now()-holdStart)/HOLD_MS):0){return{shape:resolveShape(sourceNames[dimension]).id,name:pretty(sourceNames[dimension]),dimension,operation,cut:cutPosition,cutBounds:cutLimits(),poseIndex,poses:poseList.map(p=>({id:p.id,label:operation==='slice'&&p.spacing?(p.spacing==='even'?'Even source':'Golden source'):p.label})),playing:autoPlaying,reducedMotion:reduce,transitioning:!!motion,progress,freeOrientation,gaps:{...layerGaps},tilt:planeTilt*180/Math.PI,palette,colors:{...colors}}}
  function notify(progress){if(!ready||destroyed)return;const value=state(progress);for(const fn of subscribers){if(destroyed)break;fn(value)}if(!destroyed)options.onChange?.(value)}
 // One selected source and one real rotation drive the entire shadow chain.
 let mode='shadows',operation='collapse',dimension=3,cutPosition=0,queued=false,cutPointer=null,cutGrabOffset=0;
 const sliceChoices={2:['Square','Triangle'],3:['Cube','Tetra','Octa','Icosa','Dodeca'],4:['Tesseract','5-cell','16-cell']};
 const sourceNames={2:'Square',3:'Cube',4:'Tesseract'},orientationIndices={2:0,3:0,4:0},CAMERA_E=.5,CONTEXT_W=.65;
 const pretty=n=>FULL[n]||n;
-const defaultGaps={2:32,3:12,4:0},layerGaps={...defaultGaps};let planeTilt=17*Math.PI/180;
+const defaultGaps={2:32,3:8,4:0},layerGaps={...defaultGaps};let planeTilt=17*Math.PI/180;
 
 let rotation=I4(),baseModel=null,freeOrientation=false,selectedCell=0,poseList=[],poseIndex=0;
 let autoPlaying=false,motion=null,motionFrame=null,holdStart=0;const HOLD_MS=5000,TURN_MS=1200;
@@ -53,7 +54,7 @@ function sliceData(n=dimension,s=cutPosition){if(![2,3,4].includes(n)||!Number.i
 function chooseDimension(n){if(![2,3,4].includes(n))throw new Error('Choose a listed dimension.');if(n!==dimension)chooseShape(sourceNames[n])}
 function chooseMode(next){if(next!=='shadows')return;mode=next;syncUi();draw()}
 function chooseOperation(next){stopAuto();if(next==='project')next='collapse';if(!['slice','collapse'].includes(next))throw new Error('Choose Slice or Collapse.');operation=next;cutPointer=null;shadow.clearSelection();syncUi();draw()}
-function chooseShape(name){const n=[2,3,4].find(n=>sliceChoices[n].includes(name));if(!n)throw new Error('Choose a listed shape.');stopAuto();dimension=n;sourceNames[n]=name;orientationIndices[n]=0;cutPosition=0;cutPointer=null;resetOrientation();syncUi();shadow.clearSelection();draw();startAuto()}
+function chooseShape(name){const n=[2,3,4].find(n=>sliceChoices[n].includes(name));if(!n)throw new Error('Choose a listed shape.');stopAuto();dimension=n;sourceNames[n]=name;orientationIndices[n]=0;cutPosition=0;cutPointer=null;resetOrientation();syncUi();shadow.clearSelection();openSelection();if(!destroyed&&!reduce){changeAnimation?.cancel();changeAnimation=stage.animate?.([{opacity:.65},{opacity:1}],{duration:180,easing:'ease-out'});changeAnimation?.finished?.catch(()=>{})}}
 function rotateSlice(){selectPose((poseIndex+1)%poseList.length)}
 function rotateShared(dx,dy){stopAuto();if(dimension===2)rotation=mm4(giv(0,1,(dx-dy)*.01),rotation);else{if(dx)rotation=mm4(giv(0,dimension===4?3:2,-dx*.01),rotation);if(dy)rotation=mm4(giv(1,2,dy*.01),rotation)}freeOrientation=true;shadow.clearSelection();updateRotateLabel();redraw()}
 function cutLimits(){const P=sharedSource().P,axis=dimension===4?3:1,values=P.map(p=>p[axis]);return{min:Math.min(...values),max:Math.max(...values)}}
@@ -71,7 +72,19 @@ function beginPose(index,automatic){
  motion={path:CuratedRotations.rotationPath(rotation,target,dimension),target:target.slice(),start:performance.now(),automatic};freeOrientation=true;buildPoseButtons();
 }
 function selectPose(index){stopAuto();beginPose(index,false);if(motion&&motionFrame===null)motionFrame=requestAnimationFrame(runMotion)}
-function startAuto(){if(reduce||!autoEnabled||destroyed)return;autoPlaying=true;holdStart=performance.now();buildPoseButtons();if(destroyed||!autoPlaying)return;$('poseStatus').textContent=pretty(sourceNames[dimension])+'. '+poseList[poseIndex].label+'.';if(motionFrame===null)motionFrame=requestAnimationFrame(runMotion)}
+function randomOrientation(){let M=I4();for(let i=0;i<dimension;i++)for(let j=i+1;j<dimension;j++)M=mm4(giv(i,j,(Math.random()*2-1)*Math.PI),M);return M}
+function openSelection(){
+ if(destroyed)return;
+ if(reduce||!autoEnabled){draw();return}
+ rotation=randomOrientation();freeOrientation=true;autoPlaying=true;beginPose(0,true);draw();
+ if(!destroyed&&autoPlaying&&motionFrame===null)motionFrame=requestAnimationFrame(runMotion);
+}
+function startAuto(){
+ if(reduce||!autoEnabled||destroyed)return;autoPlaying=true;holdStart=performance.now();
+ if(freeOrientation&&!motion)beginPose(poseIndex,true);else buildPoseButtons();
+ if(destroyed||!autoPlaying)return;$('poseStatus').textContent=pretty(sourceNames[dimension])+'. '+poseList[poseIndex].label+'.';
+ if(motionFrame===null)motionFrame=requestAnimationFrame(runMotion);
+}
 function runMotion(now){
  if(destroyed)return;motionFrame=null;const current=motion;
  if(current){const t=Math.max(0,Math.min(1,(now-current.start)/TURN_MS)),eased=t*t*(3-2*t);rotation=current.path.at(eased);clampCut();draw();
@@ -83,7 +96,7 @@ function runMotion(now){
 let palette='teal';
 function choosePalette(id){if(!colorPresets[id])throw new Error('Choose a listed color scheme.');stopAuto();palette=id;setColors(colorPresets[id].values);draw();notify()}
 function setViewOptions({gap,stage=dimension,tilt}={}){stopAuto();
- if(gap!==undefined){if(![2,3,4].includes(stage)||!Number.isFinite(gap)||gap<0||gap>64)throw new Error('Choose a dimension gap from 0–64 pixels.');layerGaps[stage]=gap}
+ if(gap!==undefined){if(![2,3,4].includes(stage)||!Number.isFinite(gap)||gap< -256||gap>64)throw new Error('Choose a dimension gap from −256–64 pixels.');layerGaps[stage]=gap}
  if(tilt!==undefined){if(!Number.isFinite(tilt)||tilt<5||tilt>90)throw new Error('Tilt must be 5–90 degrees.');planeTilt=tilt*Math.PI/180}
  syncViewControls();draw();
 }
@@ -131,12 +144,12 @@ function drawSliceSource(f,q){
  if(lifted.length>1){c.setLineDash([3,4]);graph(c,lifted,q.edges,project,css.m2,.45,.85);c.setLineDash([])}
 }
 function drawMesh3(f,mesh){
- const {verts,edges}=mesh,c=f.c,project=v=>project3(v,f),depth=p=>p[1]*Math.sin(CAMERA_E)+p[2]*Math.cos(CAMERA_E),D=verts.map(depth);
- const facets=(mesh.facets||[]).map(face=>Array.isArray(face)?face:face.ids);
+ const {verts}=mesh,c=f.c,project=v=>project3(v,f),view=convexVisibility3(mesh);
  c.fillStyle=css.glass;
- if(facets.length){facets.map(ids=>({ids,d:ids.reduce((sum,i)=>sum+D[i],0)/ids.length})).sort((a,b)=>a.d-b.d).forEach(face=>{path(c,face.ids.map(i=>project(verts[i])),true);c.fill()})}
- else if(verts.length>2){path(c,hull2(verts.map(project)),true);c.fill()}
- for(const[i,j]of edges){const a=edgeAppearance((D[i]+D[j])/2);graph(c,verts,[[i,j]],project,css.solid,a.alpha,a.width)}
+ if(view.faces.length){for(const face of view.faces.slice().sort((a,b)=>a.depth-b.depth)){path(c,face.ids.map(i=>project(verts[i])),true);c.globalAlpha=.18+.82*face.front;c.fill()}}
+ else if(verts.length>2){path(c,hull2(verts.map(project)),true);c.globalAlpha=1;c.fill()}
+ c.globalAlpha=1;
+ for(const {edge,alpha,width}of view.edges)graph(c,verts,[edge],project,css.solid,alpha,width);
 }
 function drawSliceResult(f,q){if(q.kind==='polyhedron')drawMesh3(f,q);else fillShape(f.c,q.verts,q.edges,q.facets,v=>projectResult(v,f),.18)}
 // A whole-object projection uses all source vertices, never a selected cut.
@@ -185,20 +198,25 @@ function createShadowExplorer(){
  // Layout depends on viewport, dimension and explicit presentation only.
  // All shapes have unit circumradius; every section remains inside that ball.
  function layout(){
-  W=cv.clientWidth||800;const LW=W>=560?72:64,right=44,avail=W-LW-right,k=Math.sin(planeTilt),b=shapeVisualBounds(S.name,S.dim,k);
-  R=Math.max(32,Math.min(136,avail/2-8));const o={LW,ox:LW+avail/2,planeScale:k,planeDepth:0,planeRadius:b.body,bodyBound:b.body,sourceBound:b.source,gaps:{...layerGaps}};
+  W=cv.clientWidth||800;const labelX=W>760?24:16;ctx.font='400 13px system-ui, sans-serif';const labelWidth=Math.min(104,Math.max(62,...sliceChoices[S.dim].map(name=>ctx.measureText(pretty(name)).width))),LW=labelX+labelWidth+14,right=40,avail=W-LW-right,k=Math.sin(planeTilt),b=shapeVisualBounds(S.name,S.dim,k);
+  R=Math.max(32,Math.min(136,avail/2-8));const o={LW,labelX,labelWidth,ox:LW+avail/2,planeScale:k,planeDepth:0,planeRadius:b.body,bodyBound:b.body,sourceBound:b.source,gaps:{...layerGaps}};
   if(S.dim===4){o.sourceTop=8;o.sourceY=8+b.source*R;o.oy3=o.sourceY+b.first*R+layerGaps[4];o.top3=o.oy3-b.body*R;}
   else{o.top3=16;o.oy3=o.top3+R;}
   o.planeY=o.oy3+b.joint*R+layerGaps[3];o.planeBack=o.planeY-k*R;o.planeFront=o.planeY+k*R;
-  o.strip=S.dim===2?o.oy3+R+layerGaps[2]:o.planeFront+layerGaps[2];H=o.strip+76;return o;
+  o.strip=S.dim===2?o.oy3+R+layerGaps[2]:o.planeFront+layerGaps[2];
+  // Experimental negative gaps may reorder or overlap stages. Keep every stage on canvas.
+  const minY=Math.min(o.top3,S.dim===4?o.sourceTop:Infinity,S.dim>=3?o.planeBack:Infinity,o.strip-22),shift=Math.max(0,8-minY);
+  for(const key of ['sourceTop','sourceY','oy3','top3','planeY','planeBack','planeFront','strip'])if(o[key]!==undefined)o[key]+=shift;
+  H=Math.max(o.oy3+R,S.dim===4?o.sourceY+b.source*R:0,S.dim>=3?o.planeFront:0,o.strip+30)+30;return o;
  }
- function resize(){lay=layout();const d=Math.min(2,devicePixelRatio||1);cv.style.height=H+'px';if(cv.width!==Math.round(W*d)||cv.height!==Math.round(H*d)){cv.width=Math.round(W*d);cv.height=Math.round(H*d)}ctx.setTransform(d,0,0,d,0,0);if(S.dim!==4)compactFrames={source:{c:ctx,w:W,h:H,R,ox:lay.ox,oy:lay.oy3},result:{c:ctx,w:W,h:H,R,ox:lay.ox,oy:S.dim===3?lay.planeY:lay.strip},planeY:lay.planeY,H};const side=2*R;hit.style.width=hit.style.height=side+'px';hit.style.left=(lay.ox-side/2)+'px';hit.style.top=(lay.oy3-side/2)+'px';if(S.dim===4){const height=2*lay.sourceBound*R;sourceHit.style.width=sourceHit.style.height=height+'px';sourceHit.style.left=(lay.ox-height/2)+'px';sourceHit.style.top=lay.sourceTop+'px'}}
+ function resize(){lay=layout();const d=Math.min(2,devicePixelRatio||1);cv.style.height=H+'px';if(cv.width!==Math.round(W*d)||cv.height!==Math.round(H*d)){cv.width=Math.round(W*d);cv.height=Math.round(H*d)}ctx.setTransform(d,0,0,d,0,0);if(S.dim!==4)compactFrames={source:{c:ctx,w:W,h:H,R,ox:lay.ox,oy:lay.oy3},result:{c:ctx,w:W,h:H,R,ox:lay.ox,oy:S.dim===3?lay.planeY:lay.strip},planeY:lay.planeY,H};const side=2*R;hit.style.width=hit.style.height=side+'px';hit.style.left=(lay.ox-side/2)+'px';hit.style.top=(lay.oy3-side/2)+'px';if(S.dim===4){const height=2*lay.sourceBound*R;sourceHit.style.width=side+'px';sourceHit.style.height=height+'px';sourceHit.style.left=(lay.ox-side/2)+'px';sourceHit.style.top=lay.sourceTop+'px'}}
  const PX=x=>lay.ox+R*x,PY=(y,z)=>lay.oy3-R*(y*CE-z*SE),planePoint=(x,z)=>[lay.ox+R*x,lay.planeY+R*lay.planeScale*z],SHY=z=>planePoint(0,z)[1],DEP=(y,z)=>y*SE+z*CE;
 function lblock(center,title,lines){
-  const total=13+15*lines.length;let y=center-total/2+11;
-  ctx.textAlign='left';ctx.fillStyle=css.ink;ctx.font='600 13px ui-monospace, monospace';ctx.fillText(title,16,y);y+=15;
-  ctx.font='400 11px ui-monospace, monospace';ctx.fillStyle=css.muted;
-  for(const t of lines){ctx.fillText(t,16,y);y+=15}return y;
+  const source=title===S.dim+'D';lines=source?[pretty(S.name)]:[];
+  const total=14+19*lines.length;let y=center-total/2+11;
+  ctx.textAlign='left';ctx.fillStyle=css.ink;ctx.font='600 13px system-ui, sans-serif';ctx.fillText(title,lay.labelX,y);y+=19;
+  ctx.font='400 13px system-ui, sans-serif';ctx.fillStyle=css.muted;
+  for(const text of lines){ctx.fillText(text,lay.labelX,y,lay.labelWidth);y+=19}return y;
 }
 
 function compute(){
@@ -297,9 +315,6 @@ function draw(){
   ctx.clearRect(0,0,W,H);
   if(S.dim===2){drawFlat(C);return C;}
 
-  // Quiet framing sits behind every projection, never on top of the shadow.
-  ctx.beginPath();ctx.arc(lay.ox,lay.oy3,Math.min(R+4,lay.planeBack-lay.oy3-2),0,Math.PI*2);ctx.strokeStyle=css.muted;ctx.globalAlpha=.06;ctx.lineWidth=1;ctx.stroke();ctx.globalAlpha=1;
-
   // ---- plane + shadow ----
   const pl=plane2([...map2.values()].map(e=>[e.x,0,e.z,0]),[[0,1,0,0],[0,0,0,1]]);
   const hullKeys=new Set();let silhouette=[];
@@ -359,14 +374,14 @@ listen(input,'keydown',e=>{const steps={ArrowUp:.01,ArrowRight:.01,ArrowDown:-.0
  syncUi();draw();ready=true;
  for(const event of['pointerdown','keydown','focusin','wheel'])listen(stage,event,stopAuto,{capture:true,passive:event==='wheel'});
  listen(document,'visibilitychange',()=>{if(document.hidden)stopAuto()});
- if(motionPreference.addEventListener)listen(motionPreference,'change',e=>{reduce=e.matches;if(reduce)stopAuto()});
- startAuto();notify();
+ if(motionPreference.addEventListener)listen(motionPreference,'change',e=>{reduce=e.matches;if(reduce)stopAuto();notify()});
+ if(options.pose===undefined)openSelection();else startAuto();notify();
  function validate(next){
   const model=resolveShape(next.shape??options.shape??'cube');
   if(next.operation!==undefined&&!['slice','collapse'].includes(next.operation))throw new Error('Choose Slice or Collapse.');
   if(next.cut!==undefined&&!Number.isFinite(next.cut))throw new Error('Cut must be finite.');
   if(next.tilt!==undefined&&(!Number.isFinite(next.tilt)||next.tilt<5||next.tilt>90))throw new Error('Tilt must be 5–90 degrees.');
-  if(next.gaps)for(const[n,g]of Object.entries(next.gaps))if(![2,3,4].includes(+n)||!Number.isFinite(g)||g<0||g>64)throw new Error('Dimension gaps must be 0–64 pixels.');
+  if(next.gaps)for(const[n,g]of Object.entries(next.gaps))if(![2,3,4].includes(+n)||!Number.isFinite(g)||g< -256||g>64)throw new Error('Dimension gaps must be −256–64 pixels.');
   if(next.colors)for(const[k,v]of Object.entries(next.colors))if(!(k in defaultColors)||typeof v!=='string'||!v.trim())throw new Error('Use supported color names and CSS color strings.');
   if(next.pose!==undefined){const poses=CuratedRotations.presetsFor(sliceModel(model.key,model.dimension));if(!Number.isInteger(next.pose)||!poses[next.pose])throw new Error('Choose a listed pose.');}
  }
@@ -387,10 +402,10 @@ listen(input,'keydown',e=>{const steps={ArrowUp:.01,ArrowRight:.01,ArrowDown:-.0
   setShape(value){assertAlive();chooseShape(resolveShape(value).key)},setOperation(value){assertAlive();chooseOperation(value)},setCut(value){assertAlive();return setCutPosition(value)},
   selectPose(index){assertAlive();if(!Number.isInteger(index)||!poseList[index])throw new Error('Choose a listed pose.');selectPose(index)},nextPose(){assertAlive();rotateSlice()},
   rotate(dx,dy){assertAlive();if(!Number.isFinite(dx)||!Number.isFinite(dy))throw new Error('Rotation deltas must be finite.');rotateShared(dx,dy)},
-  setView(value){assertAlive();setViewOptions(value)},setPalette(value){assertAlive();choosePalette(value)},stop(){assertAlive();stopAuto()},
+  setView(value){assertAlive();setViewOptions(value)},setPalette(value){assertAlive();choosePalette(value)},play(){assertAlive();autoEnabled=true;startAuto()},pause(){assertAlive();stopAuto()},stop(){assertAlive();stopAuto()},
   subscribe(fn){assertAlive();if(typeof fn!=='function')throw new Error('Pass a listener.');subscribers.add(fn);fn(state());return()=>subscribers.delete(fn)},
   readProjection(){assertAlive();const q=shadow.inspect(),p=q.resultChain||q;return{shape:state().shape,dimension,operation,vertices:p.n,positions:p.groups.length,multiplicities:p.live||p.groups.map(g=>g.idx.length)}},
-  destroy(){if(destroyed)return;destroyed=true;stopAuto();if(redrawFrame!==null)cancelAnimationFrame(redrawFrame);observer.disconnect();for(const off of cleanup)off();for(const el of Object.values(parts)){if(el.hasPointerCapture?.(cutPointer))el.releasePointerCapture(cutPointer)}subscribers.clear();stage.remove()}
+  destroy(){if(destroyed)return;destroyed=true;stopAuto();changeAnimation?.cancel();if(redrawFrame!==null)cancelAnimationFrame(redrawFrame);observer.disconnect();for(const off of cleanup)off();for(const el of Object.values(parts)){if(el.hasPointerCapture?.(cutPointer))el.releasePointerCapture(cutPointer)}subscribers.clear();stage.remove()}
  };
  return api;
 }

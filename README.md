@@ -50,7 +50,7 @@ Shape IDs: `square`, `triangle`, `cube`, `tetrahedron`, `octahedron`, `icosahedr
 - `getState()` — a fresh snapshot of shape, operation, cutter bounds, poses, progress, colors and layout settings
 - `setOptions(patch)` — apply changed options while preserving the current rotation for color/layout changes
 - `setShape(id)`, `setOperation('slice' | 'collapse')`, `setCut(number)`
-- `selectPose(index)`, `nextPose()`, `rotate(horizontalPixels, verticalPixels)`, `stop()`
+- `selectPose(index)`, `nextPose()`, `rotate(horizontalPixels, verticalPixels)`, `play()`, `pause()`, `stop()`
 - `setView({stage, gap, tilt})`, `setPalette('teal' | 'blue' | 'clay')`
 - `subscribe(listener)` — returns an unsubscribe function; includes progress updates for a host's optional pose indicator
 - `readProjection()` — vertex multiplicities and resulting line positions
@@ -58,11 +58,11 @@ Shape IDs: `square`, `triangle`, `cube`, `tetrahedron`, `octahedron`, `icosahedr
 
 Options and corresponding React props: `shape`, `operation`, `cut`, `pose`, `colors`, `gaps`, `tilt`, `autoRotate`, `onChange`. React also accepts ordinary container attributes, `className` and `style`. Changed props are patched without remounting. React `cut` and `pose` changes act as new values when those props change; unrelated renders do not reset user interaction.
 
-`gaps` is keyed by the upper dimension: `{4: 0, 3: 12, 2: 32}` pixels. `tilt` is 5–90 degrees, default 17. Layer centers remain fixed during rotation and cuts. Safe bounds retain some visible slack for smaller sections. At a requested zero gap, an extremal orientation can touch; geometry is never rescaled per frame to hide that.
+`gaps` is keyed by the upper dimension: `{4: 0, 3: 8, 2: 32}` pixels. `tilt` is 5–90 degrees, default 17. Layer centers remain fixed during rotation and cuts. Safe bounds retain some visible slack for smaller sections. Gap controls accept −256 to 64 pixels. Negative values deliberately overlap or reorder the displayed layers; they are an experiment, not the default. The canvas expands or shifts the whole diagram to keep its geometry visible. At zero gap, an extremal orientation can touch. Geometry is never rescaled per frame to hide this.
 
 Supported color keys: `bg`, `panel`, `ink`, `muted`, `line`, `plane`, `planeEdge`, `m2` (accent), `lineColor`, `shadow`, `shadowBack`, `glass`, `solid`, `source`, `tick`. Colors are local to each stage. Omitted keys use the default teal palette. The exported `colorPresets` provides complete alternative material palettes.
 
-A newly selected shape holds its first curated pose for five seconds, then cycles. Manual interaction inside that stage stops movement; it does not restart on its own. The host can also call `stop()` for its own controls. Explicitly changing `autoRotate` from false to true restarts cycling. Reduced-motion preferences prevent automatic cycling and make manual pose changes immediate.
+With autoplay enabled, each newly selected shape starts in a random valid orientation and turns into its first curated pose. It holds that pose for five seconds, then cycles. Random starts are products of proper rotations, not a claim of uniform sampling of all orientations. An explicit initial pose overrides the random opening. Manual interaction inside that stage stops movement; it does not restart on its own. The host can call `pause()` or `stop()` for its own controls, and `play()` to resume from the current orientation. New shape selections restart the automatic opening; other manual interactions stop it. Explicitly changing `autoRotate` from false to true restarts cycling. Reduced-motion preferences prevent automatic cycling and make manual pose changes immediate.
 
 ## What the diagram means
 
@@ -70,7 +70,7 @@ Slice intersects the rotated source at a chosen coordinate: a line cuts 2D, a pl
 
 Collapse projects the entire source by dropping one coordinate. In 4D, the resulting 3D convex hull is shown, followed by its 2D and 1D projections. In Slice, those lower shadows instead come from the actual section. The same selected source and rotation drive every stage.
 
-The upper 4D picture is an oblique diagram, with context mapping `(x, y, z, w) → (x, y + 0.65w, z)`, followed by the screen camera. It is not a literal or distance-preserving view of four dimensions. Its line opacity is a smooth depth cue in that diagram, not a claim of physical 4D occlusion. A circle is only keyboard focus around the rotation target; it does not encode the six independent 4D rotation planes, and there is no misleading single-angle orbit marker.
+The upper 4D picture is an oblique diagram, with context mapping `(x, y, z, w) → (x, y + 0.65w, z)`, followed by the screen camera. It is not a literal or distance-preserving view of four dimensions. Its line opacity is a smooth depth cue in that diagram, not a claim of physical 4D occlusion. Actual convex 3D bodies use outward face normals to distinguish front faces, silhouettes and rear edges, with a continuous fade through grazing views. This visibility classification is separate from the 4D context’s depth cue.
 
 The 2D plane uses an independent orthographic tilt. Its back edge does not shrink. Projection coordinates are calculated before that display transform, and connector endpoints use the same transform. Dots above the 1D shadow have area proportional to coincident vertex count. `1` and `φ` are spacing ratios to the smallest gap, shown only in validated curated alignments; they are not vertex counts.
 
