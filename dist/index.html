@@ -7,15 +7,15 @@
  <div class="dimension-options" id="dimensionOptions" role="group" aria-label="Dimension"><button type="button" data-dimension="2" aria-pressed="false">2D</button><button type="button" data-dimension="3" aria-pressed="true">3D</button><button type="button" data-dimension="4" aria-pressed="false">4D</button></div>
  <div class="shape-icons" id="shapeIcons" role="group" aria-label="Shape"></div>
 </div>
-<div class="page-pad">
- <h2 id="shapeTitle">Cube</h2>
+<div class="story-scroll" data-demo-aside-scroll><div class="story-inner page-pad">
+ <p id="shapeTitle" class="shape-title">Cube</p>
+ <h2 id="storyTitle">How much can a shadow reveal?</h2>
  <p id="sceneThought" class="scene-thought">How much of a shape can its shadow tell you?</p>
  <fieldset class="settings"><legend>Settings</legend>
  <div class="pose-row"><button id="playPause" class="play-pause" type="button" aria-label="Pause rotation" title="Pause rotation"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg></button><div id="poseButtons" class="pose-buttons" role="group" aria-label="Orientation presets" aria-describedby="poseHint"></div></div>
  <span id="poseHint" class="sr-only">Each new shape turns from a random orientation to its first pose, then cycles. Interacting stops automatic movement. Play resumes it.</span>
 
   <div class="settings-row"><div id="operationControls" class="operation-toggle" role="group" aria-label="Operation"><button id="operationSlice" type="button" aria-pressed="false">Slice</button><button id="operationCollapse" type="button" aria-pressed="true">Collapse</button></div><div id="colorPresets" class="color-presets" role="group" aria-label="Color scheme"></div></div>
-  <div class="view-lab" id="viewLab"><div id="gapControl4" class="setting"><label for="gapRange4">4D → 3D <output id="gapValue4"></output></label><input id="gapRange4" type="range" min="-256" max="64" step="1" value="0"></div><div id="gapControl3" class="setting"><label for="gapRange3">3D → 2D <output id="gapValue3"></output></label><input id="gapRange3" type="range" min="-256" max="64" step="1" value="8"></div><div id="gapControl2" class="setting"><label for="gapRange2">2D → 1D <output id="gapValue2"></output></label><input id="gapRange2" type="range" min="-256" max="64" step="1" value="32"></div><div id="tiltControl" class="setting"><label for="tiltRange">Tilt <output id="tiltValue">17°</output></label><input id="tiltRange" type="range" min="5" max="90" step="any" value="17"></div></div>
-  <p class="setting-note" id="gapNote">Negative gaps let the layers overlap.</p>
+
  </fieldset>
-</div></main><noscript>This explorer needs JavaScript to draw the geometry.</noscript></body></html>
+</div></div></main><noscript>This explorer needs JavaScript to draw the geometry.</noscript></body></html>
