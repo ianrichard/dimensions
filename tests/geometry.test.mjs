@@ -7,7 +7,7 @@ import {createDimension} from '../dist/dimension/dimension.mjs';
 
 test('vanilla module imports without a browser; every shape has a reusable SVG',()=>{
  assert.equal(typeof createDimension,'function');assert.equal(resolveShape('tetrahedron').key,'Tetra');
- assert.equal(shapes.length,10);for(const s of shapes){assert(shapeIconPaths[s.id]);assert.match(shapeIconSvg(s.id),/^<svg/)}
+ assert.equal(shapes.length,11);for(const s of shapes){assert(shapeIconPaths[s.id]);assert.match(shapeIconSvg(s.id),/^<svg/)}
  assert.throws(()=>resolveShape('unknown'));assert.throws(()=>shapeIconSvg('cube',{size:-1}));
 });
 test('all curated rotations preserve radius, exact support endpoints and real sections',()=>{

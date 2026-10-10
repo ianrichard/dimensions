@@ -22,7 +22,7 @@ Copy `dist/dimension/` into your app. Serve modules over HTTP and load its scope
 </script>
 ```
 
-The host owns width, height, padding, background and centering. The component is flush and transparent, inherits the host’s typeface, and fits one stable common geometric scale inside the supplied box. Set a definite host height; otherwise it uses a bounded fallback.
+The host owns width, height, padding, background and outer placement. The component is flush and transparent, inherits the host’s typeface, and fits one stable common geometric scale inside the supplied box. Its intrinsic envelope, including labels and the slice-control reserve, is centered on both axes when it is smaller than that box. Set a definite host height; otherwise it uses a bounded fallback.
 
 The component contains the canvas, dimension labels, rotation targets, accessible status and vertical slice control. Shape pickers, operation buttons, pose buttons and palette controls are optional host UI. `dist/app.js` is a small example host that can be replaced entirely.
 
@@ -44,7 +44,7 @@ import './dimension/dimension.css';
 <TetrahedronIcon size={24} title="Tetrahedron" />
 ```
 
-Shape IDs: `square`, `triangle`, `cube`, `tetrahedron`, `octahedron`, `icosahedron`, `dodecahedron`, `tesseract`, `5-cell`, `16-cell`. Legacy display names such as `Tetra` also resolve. `ShapeIcon` accepts a `shape` prop; named icon components are exported for all ten shapes. Independent SVG files are in `dist/dimension/icons/`. `shapeIconPaths` and `shapeIconSvg` are available without React.
+Shape IDs: `square`, `triangle`, `hexagon`, `cube`, `tetrahedron`, `octahedron`, `icosahedron`, `dodecahedron`, `tesseract`, `5-cell`, `16-cell`. Legacy display names such as `Tetra` also resolve. `ShapeIcon` accepts a `shape` prop; named icon components are exported for all eleven shapes. Independent SVG files are in `dist/dimension/icons/`. `shapeIconPaths` and `shapeIconSvg` are available without React.
 
 ## Small control contract
 
@@ -63,7 +63,7 @@ Options and corresponding React props: `demo`, `shape` (compatibility alias), `o
 
 The 4D view is a side-by-side source/result pair with no lower shadow stages. The 2D and 3D views retain their vertical shadow chains. Legacy gap and plane-tilt options apply to those lower-dimensional chains. The legacy 4D gap value remains accepted for API compatibility.
 
-Layer centers and scale remain fixed during rotation and cuts. A host resize recalculates the fit. Smaller sections naturally leave more space; they are never enlarged to fill the box. The 4D source and result use the same scale and camera. Very short hosts compress decorative reserves and hide annotations before clipping geometry. The visible slice control is a small dot on a line with a 44px interaction target at the right edge.
+Layer centers and scale remain fixed during rotation and cuts. A host resize recalculates the fit. Smaller sections naturally leave more space; they are never enlarged to fill the box. The 4D source and result use the same scale and camera. Very short hosts compress decorative reserves and hide annotations before clipping geometry. The visible slice control is a small dot on a line with a 44px interaction target at the contained envelope’s right edge.
 
 The host demo uses a phone stage near 40% of the stable viewport, fixed dimension/shape controls, and a scrolling story/settings area. Desktop places the stage beside that story. These choices belong to `app.js`/`style.css`, not the component.
 
@@ -73,7 +73,9 @@ Legacy material color overrides remain supported: `bg`, `panel`, `ink`, `muted`,
 
 Legacy `gaps` and `tilt` options remain accepted for embedding compatibility; the demo’s debug sliders are removed. Defaults are `{4: 0, 3: 8, 2: 32}` and 17°. Signed gaps can deliberately overlap layers. The renderer fits their union envelope, and compacts offsets only if no scale can fit the requested offsets into a short host. They do not alter mathematical projection or intersection data.
 
-With autoplay enabled, each newly selected shape starts in a random valid orientation and turns into its first curated pose. It holds that pose for five seconds, then cycles. Random starts are products of proper rotations, not a claim of uniform sampling of all orientations. An explicit initial pose overrides the random opening. Manual interaction inside that stage stops movement; it does not restart on its own. The host can call `pause()` or `stop()` for its own controls, and `play()` to resume from the current orientation. New shape selections restart the automatic opening; other manual interactions stop it. Explicitly changing `autoRotate` from false to true restarts cycling. Reduced-motion preferences prevent automatic cycling and make manual pose changes immediate.
+With autoplay enabled, each newly selected shape starts in a random valid orientation and turns into its first curated pose. It holds that pose for five seconds, then cycles. Random starts are products of proper rotations, not a claim of uniform sampling of all orientations. An explicit initial pose overrides the random opening. Tap the left/right half of the stage to loop backward/forward through curated poses. A tap uses a small movement threshold; dragging, scrolling, cancellation, the slice control and host buttons do not advance a pose. Tapping a line marker retains its vertex inspection. With the stage focused, Left/Right navigate poses; on either rotation target, Page Up/Page Down do the same while arrow keys still rotate. Pose selection stops autoplay and uses the normal manual transition.
+
+Manual interaction inside that stage stops movement; it does not restart on its own. The host can call `pause()` or `stop()` for its own controls, and `play()` to resume from the current orientation. New shape selections restart the automatic opening; other manual interactions stop it. Explicitly changing `autoRotate` from false to true restarts cycling. Reduced-motion preferences prevent automatic cycling and make manual pose changes immediate.
 
 ## What the diagram means
 
@@ -81,9 +83,11 @@ Slice intersects the rotated source at a chosen coordinate: a line cuts 2D, a pl
 
 Collapse projects the entire source by dropping one coordinate. In 4D, the right-hand solid is the convex hull of every rotated source vertex after dropping w. By linearity, this is the projection of the entire convex body, including its interior. A faint scaffold inside it shows the original source edges under the same map. In Slice, the right-hand shape is the actual 3D section instead. The source diagram and result share the same rotation, scale and screen camera; the 2D/1D stages are omitted in this view.
 
-The left-hand 4D picture is an oblique diagram, with context mapping `(x, y, z, w) → (x, y + 0.65w, z)`, followed by the screen camera. It is not a literal or distance-preserving view of four dimensions. Its line opacity is a smooth depth cue in that diagram, not a claim of physical 4D occlusion. Actual convex 3D bodies use outward face normals to distinguish front faces, silhouettes and rear edges, with a continuous fade through grazing views. This visibility classification is separate from the 4D context’s depth cue.
+The left-hand 4D picture is an oblique diagram, with context mapping `(x, y, z, w) → (x, y + 0.65w, z)`, followed by the screen camera. It is not a literal or distance-preserving view of four dimensions. The source stays wireframe-only, including its highlighted section; the separate 3D result retains its filled faces. Its line opacity is a smooth depth cue in that diagram, not a claim of physical 4D occlusion. Actual convex 3D bodies use outward face normals to distinguish front faces, silhouettes and rear edges, with a continuous fade through grazing views. This visibility classification is separate from the 4D context’s depth cue.
 
-The 2D plane uses an independent orthographic tilt. Its back edge does not shrink. Projection coordinates are calculated before that display transform, and connector endpoints use the same transform. Dots above the 1D shadow have area proportional to coincident vertex count. `1`, `2`, `3`, `4` and `φ` are adjacent projected-position gap ratios to the smallest gap, shown only when the entire sequence validates in a curated alignment. They are not vertex counts or absolute lengths. For example, octahedron face-first Collapse gives `1,1,2,1,1`; tetrahedron vertex/face Collapse gives `1,1,3`; the cube’s central corner-first Slice gives `1,3,2,3,1`. Unsupported, arbitrary or near-miss patterns stay unlabeled.
+The 2D plane uses an independent orthographic tilt. Its back edge does not shrink. Projection coordinates are calculated before that display transform, and connector endpoints use the same transform. Correspondence guides use one explicit light dash style. Collinear overlapping segments are merged before stroking, so a guide’s darkness does not count the vertices behind it. Dots above the 1D shadow have area proportional to coincident vertex count. `1`, `2`, `3`, `4` and `φ` are adjacent projected-position gap ratios to the smallest gap, shown only when the entire sequence validates in a curated alignment. They are not vertex counts or absolute lengths. For example, octahedron face-first Collapse gives `1,1,2,1,1`; tetrahedron vertex/face Collapse gives `1,1,3`; the cube’s central corner-first Slice gives `1,3,2,3,1`. Unsupported, arbitrary or near-miss patterns stay unlabeled.
+
+The regular Hexagon has Vertex first and Side first stops. Their collapsed line multiplicities are `2,2,2` and `1,2,2,1`, with adjacent-gap ratios `1:1` and `1:2:1`. Vertex-first extrema are points; side-first extrema retain a complete side.
 
 Intrinsic diagonals are a separate relationship: cube edge/face/body diagonal lengths are `1:√2:√3`; a tesseract adds the full diagonal `2`. Those facts are not painted onto the line-gap display. The 4D pair omits the old line-spacing preset because its supporting line view is no longer shown. All generic “Off angle” stops are removed; the random entrance turns directly into a meaningful curated stop.
 

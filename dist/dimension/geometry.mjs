@@ -620,6 +620,7 @@ function curatedSectionNormals(name,vertices){
   const specs={
     Square:[['Corner first',[1,1]],['Side first',[0,1]]],
     Triangle:[['Vertex and side',[0,1]],['Sideways',[1,0]]],
+    Hexagon:[['Vertex first',[1,0]],['Side first',[0,1]]],
     Cube:[['Corner first',[1,1,1]],['Face first',[0,0,1]],['Edge first',[1,1,0]]],
     Tetra:[['Vertex and face',vertices[0]],['Edge first',[1,0,0]]],
     Octa:[['Vertex first',[0,0,1]],['Face first',[1,1,1]]],
@@ -634,12 +635,13 @@ function curatedSectionNormals(name,vertices){
 
 // App integration: getShape defaults to the app's existing cached get(name).
 function sliceModel(name,n,orientationIndex=0,getShape){
-  const allowed={2:['Square','Triangle'],3:['Cube','Tetra','Octa','Icosa','Dodeca'],4:['Tesseract','5-cell','16-cell']};
+  const allowed={2:['Square','Triangle','Hexagon'],3:['Cube','Tetra','Octa','Icosa','Dodeca'],4:['Tesseract','5-cell','16-cell']};
   if(!allowed[n]?.includes(name))throw new Error('Choose a supported shape in this dimension.');
   let vertices,edges;
   if(n===2){
     if(name==='Square'){
       const a=1/Math.sqrt(2);vertices=[[-a,-a],[a,-a],[-a,a],[a,a]];edges=[[0,1],[0,2],[1,3],[2,3]];
+    }else if(name==='Hexagon'){const h=Math.sqrt(3)/2;vertices=[[1,0],[.5,h],[-.5,h],[-1,0],[-.5,-h],[.5,-h]];edges=vertices.map((_,i)=>[i,(i+1)%6]);
     }else{vertices=[[0,1],[-Math.sqrt(3)/2,-.5],[Math.sqrt(3)/2,-.5]];edges=[[0,1],[1,2],[2,0]];}
   }else{const model=(getShape||(typeof get!=='undefined'?get:null))(name);vertices=model.V.map(p=>p.slice(0,n));edges=model.E;}
   const orientations=curatedSectionNormals(name,vertices);

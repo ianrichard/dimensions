@@ -1,7 +1,7 @@
 export const CuratedRotations = (() => {
   'use strict';
   const PHI = (1 + Math.sqrt(5)) / 2;
-  const DIMENSIONS = Object.freeze({Square:2,Triangle:2,Cube:3,Tetra:3,Octa:3,Icosa:3,Dodeca:3,Tesseract:4,'5-cell':4,'16-cell':4});
+  const DIMENSIONS = Object.freeze({Square:2,Triangle:2,Hexagon:2,Cube:3,Tetra:3,Octa:3,Icosa:3,Dodeca:3,Tesseract:4,'5-cell':4,'16-cell':4});
   const dot = (a,b) => a.reduce((s,x,i) => s+x*b[i],0);
   const unit = v => {const s=Math.hypot(...v);if (!(s>1e-14)) throw new Error('Direction is zero.');return v.map(x=>x/s);};
   const identity = () => [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1];
@@ -64,6 +64,7 @@ export const CuratedRotations = (() => {
     const specifications={
       Square:[['corner-first','Corner first',[1,1]],['side-first','Side first',[0,1]]],
       Triangle:[['sideways','Sideways',[1,0]]],
+      Hexagon:[['vertex-first','Vertex first',[1,0]],['side-first','Side first',[0,1]]],
       Cube:[['corner-first','Corner first',[1,1,1]],['face-first','Face first',[0,1,0]]],
       Tetra:[['vertex-face','Vertex and face',V[0]],['edge-first','Edge first',[1,0,0]]],
       Octa:[['vertex-first','Vertex first',[1,0,0]],['face-first','Face first',[1,1,1]]],

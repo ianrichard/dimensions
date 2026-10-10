@@ -10,6 +10,7 @@ export function Dimension({demo,shape,colors,theme='auto',swapDuration=500,opera
 }
 export function ShapeIcon({shape,size=32,title,strokeWidth=1.35,...props}){const id=resolveShape(shape).id;return createElement('svg',{xmlns:'http://www.w3.org/2000/svg',viewBox:'0 0 32 32',width:size,height:size,fill:'none',stroke:'currentColor',strokeWidth,strokeLinecap:'round',strokeLinejoin:'round',role:title?'img':undefined,'aria-label':title,'aria-hidden':title?undefined:true,...props},title?createElement('title',null,title):null,createElement('path',{d:shapeIconPaths[id]}))}
 export const SquareIcon=props=>createElement(ShapeIcon,{...props,shape:'square'});
+export const HexagonIcon=props=>createElement(ShapeIcon,{...props,shape:'hexagon'});
 export const TriangleIcon=props=>createElement(ShapeIcon,{...props,shape:'triangle'});
 export const CubeIcon=props=>createElement(ShapeIcon,{...props,shape:'cube'});
 export const TetrahedronIcon=props=>createElement(ShapeIcon,{...props,shape:'tetrahedron'});
